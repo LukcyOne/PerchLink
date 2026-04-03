@@ -11,7 +11,6 @@ interface AppShellProps {
   primaryActionLabel: string;
   onPrimaryAction?: () => void;
   resolveNavLabel?: (labelKey: ShellNavigationItem['labelKey']) => string;
-  localeControl?: ReactNode;
   utilities?: ReactNode;
   children?: ReactNode;
 }
@@ -23,7 +22,6 @@ export function AppShell({
   primaryActionLabel,
   onPrimaryAction,
   resolveNavLabel,
-  localeControl,
   utilities,
   children,
 }: AppShellProps) {
@@ -43,7 +41,6 @@ export function AppShell({
           title={pageTitle}
           primaryActionLabel={primaryActionLabel}
           onPrimaryAction={onPrimaryAction}
-          localeControl={localeControl}
           utilities={utilities}
         />
         <section style={{ padding: 'var(--space-xl)', minWidth: 0 }}>{children}</section>
