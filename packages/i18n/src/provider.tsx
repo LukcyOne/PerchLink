@@ -25,9 +25,21 @@ function resolveInitialLocale(initialLocale?: SupportedLocale): SupportedLocale 
 
 export function LocaleProvider({ children, initialLocale }: LocaleProviderProps) {
   const [locale, setLocaleState] = useState<SupportedLocale>(() => resolveInitialLocale(initialLocale));
+  const [ready, setReady] = useState<boolean>(i18nInstance.isInitialized);
 
   useEffect(() => {
-    void ensureI18n(locale);
+    let cancelled = false;
+    setReady(false);
+
+    void ensureI18n(locale).then(() => {
+      if (!cancelled) {
+        setReady(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [locale]);
 
   const contextValue = useMemo(
@@ -36,11 +48,14 @@ export function LocaleProvider({ children, initialLocale }: LocaleProviderProps)
       setLocale: async (nextLocale: SupportedLocale) => {
         setStoredLocale(nextLocale);
         setLocaleState(nextLocale);
-        await ensureI18n(nextLocale);
       },
     }),
     [locale],
   );
+
+  if (!ready) {
+    return null;
+  }
 
   return (
     <LocaleContext.Provider value={contextValue}>
