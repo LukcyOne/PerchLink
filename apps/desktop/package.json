@@ -9,6 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@perchlink/core": "workspace:*",
+    "@perchlink/i18n": "workspace:*",
+    "@perchlink/store": "workspace:*",
+    "@perchlink/ui": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
