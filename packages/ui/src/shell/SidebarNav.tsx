@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { NavItemId, ShellNavigationItem } from '@perchlink/core';
 
 interface SidebarNavProps {
@@ -18,13 +19,17 @@ const railStyle: CSSProperties = {
   borderRight: '1px solid var(--color-border-subtle)',
 };
 
-export function SidebarNav({ items, activeId, renderLabel = (labelKey) => labelKey }: SidebarNavProps) {
+export function SidebarNav({ items, activeId, renderLabel }: SidebarNavProps) {
+  const { t } = useTranslation();
+
   return (
     <aside style={railStyle}>
       <div style={{ fontSize: 'var(--type-display)', fontWeight: 'var(--weight-semibold)' }}>PerchLink</div>
       <nav aria-label="Primary navigation" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
         {items.map((item) => {
           const isActive = item.id === activeId;
+          const label = renderLabel ? renderLabel(item.labelKey) : t(item.labelKey);
+
           return (
             <a
               key={item.id}
@@ -40,7 +45,7 @@ export function SidebarNav({ items, activeId, renderLabel = (labelKey) => labelK
                 fontWeight: 'var(--weight-semibold)',
               }}
             >
-              {renderLabel(item.labelKey)}
+              {label}
             </a>
           );
         })}
