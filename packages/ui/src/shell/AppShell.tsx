@@ -10,6 +10,7 @@ interface AppShellProps {
   pageTitle: string;
   primaryActionLabel: string;
   onPrimaryAction?: () => void;
+  onNavigate?: (href: string) => void;
   resolveNavLabel?: (labelKey: ShellNavigationItem['labelKey']) => string;
   utilities?: ReactNode;
   children?: ReactNode;
@@ -21,6 +22,7 @@ export function AppShell({
   pageTitle,
   primaryActionLabel,
   onPrimaryAction,
+  onNavigate,
   resolveNavLabel,
   utilities,
   children,
@@ -35,7 +37,7 @@ export function AppShell({
         color: 'var(--color-text-primary)',
       }}
     >
-      <SidebarNav items={navigationItems} activeId={activeNavId} renderLabel={resolveNavLabel} />
+      <SidebarNav items={navigationItems} activeId={activeNavId} onNavigate={onNavigate} renderLabel={resolveNavLabel} />
       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <TopBar
           title={pageTitle}
