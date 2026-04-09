@@ -72,15 +72,18 @@ fn select_category(
         }
 
         let category_name_lower = category.name.to_lowercase();
-        let category_tokens = category_name_lower
+        let mut category_tokens = category_name_lower
             .split(|character: char| !character.is_alphanumeric())
             .filter(|token| token.len() >= 2)
+            .map(|token| token.to_string())
             .collect::<Vec<_>>();
+
+        category_tokens.extend(category_hint_tokens(&category_name_lower));
 
         let mut score = 0usize;
 
         for token in category_tokens {
-            if tokens.contains(token) || content_lower.contains(token) {
+            if tokens.contains(&token) || content_lower.contains(&token) {
                 score += 1;
             }
         }
@@ -93,6 +96,47 @@ fn select_category(
     best_match
         .map(|(category, _)| category.id.clone())
         .or(fallback_unsorted)
+}
+
+fn category_hint_tokens(category_name_lower: &str) -> Vec<String> {
+    let mut hints = Vec::new();
+
+    if category_name_lower.contains("development")
+        || category_name_lower.contains("developer")
+        || category_name_lower.contains("programming")
+        || category_name_lower == "dev"
+    {
+        hints.extend(
+            [
+                "react",
+                "javascript",
+                "typescript",
+                "rust",
+                "frontend",
+                "backend",
+                "web",
+                "api",
+                "code",
+                "coding",
+                "software",
+                "hooks",
+                "docs",
+                "documentation",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+    }
+
+    if category_name_lower.contains("design") || category_name_lower.contains("ui") || category_name_lower.contains("ux") {
+        hints.extend(["design", "ui", "ux", "layout", "prototype"].into_iter().map(str::to_string));
+    }
+
+    if category_name_lower.contains("productivity") || category_name_lower.contains("workflow") {
+        hints.extend(["productivity", "workflow", "notes", "pkm", "automation"].into_iter().map(str::to_string));
+    }
+
+    hints
 }
 
 fn flatten_categories(categories: &[CategoryTreeNodeDto]) -> Vec<&CategoryTreeNodeDto> {
