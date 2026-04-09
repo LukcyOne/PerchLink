@@ -1,7 +1,18 @@
 import type { BookmarkRecord } from '@perchlink/core';
 import { invokeDesktop } from './desktopBridge';
 
-interface DesktopBookmarkRecordDto {
+interface DesktopBookmarkAiSuggestionDto {
+  run_id: string;
+  status: NonNullable<BookmarkRecord['aiSuggestion']>['status'];
+  proposed_primary_category_id: string | null;
+  proposed_description: string | null;
+  proposed_tags: string[];
+  last_error: string | null;
+  generated_at: string | null;
+  updated_at: string;
+}
+
+export interface DesktopBookmarkRecordDto {
   id: string;
   url: string;
   normalized_url: string;
@@ -23,6 +34,7 @@ interface DesktopBookmarkRecordDto {
   processing_status: BookmarkRecord['processingStatus'];
   processing_error: string | null;
   user_edited_mask: BookmarkRecord['userEditedMask'];
+  ai_suggestion: DesktopBookmarkAiSuggestionDto | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -55,6 +67,18 @@ export function mapBookmarkDto(bookmark: DesktopBookmarkRecordDto): BookmarkReco
     processingStatus: bookmark.processing_status,
     processingError: bookmark.processing_error,
     userEditedMask: bookmark.user_edited_mask,
+    aiSuggestion: bookmark.ai_suggestion
+      ? {
+          status: bookmark.ai_suggestion.status,
+          runId: bookmark.ai_suggestion.run_id,
+          proposedPrimaryCategoryId: bookmark.ai_suggestion.proposed_primary_category_id,
+          proposedDescription: bookmark.ai_suggestion.proposed_description,
+          proposedTags: bookmark.ai_suggestion.proposed_tags,
+          lastError: bookmark.ai_suggestion.last_error,
+          generatedAt: bookmark.ai_suggestion.generated_at,
+          updatedAt: bookmark.ai_suggestion.updated_at,
+        }
+      : null,
     createdAt: bookmark.created_at,
     updatedAt: bookmark.updated_at,
     deletedAt: bookmark.deleted_at,

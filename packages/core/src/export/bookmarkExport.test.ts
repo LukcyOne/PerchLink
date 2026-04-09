@@ -18,6 +18,7 @@ const dataset = {
       isStarred: false,
       processingStatus: 'ready' as const,
       processingError: null,
+      aiSuggestion: null,
       userEditedMask: [],
       createdAt: '2026-04-07',
       updatedAt: '2026-04-07',

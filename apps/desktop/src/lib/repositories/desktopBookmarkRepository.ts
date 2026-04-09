@@ -1,4 +1,5 @@
 import type {
+  ApplyAiSuggestionsInput,
   BookmarkListQuery,
   BookmarkRecord,
   BookmarkRepository,
@@ -13,7 +14,8 @@ import type {
   UpdateBookmarkPatch,
 } from '@perchlink/core';
 import { invokeDesktop } from '../desktopBridge';
-import { mapBookmarkDto, queueMetadataExtraction, retryMetadataExtraction } from '../metadataClient';
+import { applyAiSuggestions, queueAiEnrichment, retryAiEnrichment } from '../aiClient';
+import { mapBookmarkDto, queueMetadataExtraction, retryMetadataExtraction, type DesktopBookmarkRecordDto } from '../metadataClient';
 
 interface DesktopTagRecordDto {
   id: string;
@@ -44,27 +46,6 @@ interface DesktopCollectionRecordDto {
   bookmark_count: number;
   created_at: string;
   updated_at: string;
-}
-
-interface DesktopBookmarkRecordDto {
-  id: string;
-  url: string;
-  normalized_url: string;
-  title: string;
-  description: string | null;
-  description_excerpt: string | null;
-  favicon: string | null;
-  cover_url: string | null;
-  primary_category_id: string | null;
-  tags: DesktopTagRecordDto[];
-  collection_ids: string[];
-  is_starred: boolean;
-  processing_status: BookmarkRecord['processingStatus'];
-  processing_error: string | null;
-  user_edited_mask: BookmarkRecord['userEditedMask'];
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
 }
 
 function mapTag(tag: DesktopTagRecordDto): TagRecord {
@@ -104,38 +85,15 @@ function mapCollection(collection: DesktopCollectionRecordDto): CollectionRecord
   };
 }
 
-function mapBookmark(bookmark: DesktopBookmarkRecordDto): BookmarkRecord {
-  return {
-    id: bookmark.id,
-    url: bookmark.url,
-    normalizedUrl: bookmark.normalized_url,
-    title: bookmark.title,
-    description: bookmark.description,
-    descriptionExcerpt: bookmark.description_excerpt ?? bookmark.description,
-    favicon: bookmark.favicon,
-    coverUrl: bookmark.cover_url,
-    primaryCategoryId: bookmark.primary_category_id,
-    tags: bookmark.tags.map(mapTag),
-    collectionIds: bookmark.collection_ids,
-    isStarred: bookmark.is_starred,
-    processingStatus: bookmark.processing_status,
-    processingError: bookmark.processing_error,
-    userEditedMask: bookmark.user_edited_mask,
-    createdAt: bookmark.created_at,
-    updatedAt: bookmark.updated_at,
-    deletedAt: bookmark.deleted_at,
-  };
-}
-
 export class DesktopBookmarkRepository implements BookmarkRepository {
   async createBookmark(input: CreateBookmarkInput): Promise<BookmarkRecord> {
     const bookmark = await invokeDesktop<DesktopBookmarkRecordDto>('desktop_create_bookmark', { input });
-    return mapBookmark(bookmark);
+    return mapBookmarkDto(bookmark);
   }
 
   async updateBookmark(bookmarkId: string, patch: UpdateBookmarkPatch): Promise<BookmarkRecord> {
     const bookmark = await invokeDesktop<DesktopBookmarkRecordDto>('desktop_update_bookmark', { bookmarkId, patch });
-    return mapBookmark(bookmark);
+    return mapBookmarkDto(bookmark);
   }
 
   async deleteBookmark(bookmarkId: string): Promise<void> {
@@ -144,22 +102,22 @@ export class DesktopBookmarkRepository implements BookmarkRepository {
 
   async getBookmark(bookmarkId: string): Promise<BookmarkRecord | null> {
     const bookmark = await invokeDesktop<DesktopBookmarkRecordDto | null>('desktop_get_bookmark', { bookmarkId });
-    return bookmark ? mapBookmark(bookmark) : null;
+    return bookmark ? mapBookmarkDto(bookmark) : null;
   }
 
   async listBookmarks(query?: BookmarkListQuery): Promise<BookmarkRecord[]> {
     const bookmarks = await invokeDesktop<DesktopBookmarkRecordDto[]>('desktop_list_bookmarks', { query });
-    return bookmarks.map(mapBookmark);
+    return bookmarks.map(mapBookmarkDto);
   }
 
   async searchBookmarks(query: BookmarkSearchQuery): Promise<BookmarkRecord[]> {
     const bookmarks = await invokeDesktop<DesktopBookmarkRecordDto[]>('desktop_search_bookmarks', { query });
-    return bookmarks.map(mapBookmark);
+    return bookmarks.map(mapBookmarkDto);
   }
 
   async filterBookmarks(query: BookmarkSearchQuery): Promise<BookmarkRecord[]> {
     const bookmarks = await invokeDesktop<DesktopBookmarkRecordDto[]>('desktop_filter_bookmarks', { query });
-    return bookmarks.map(mapBookmark);
+    return bookmarks.map(mapBookmarkDto);
   }
 
   async queueMetadataExtraction(bookmarkId: string): Promise<BookmarkRecord> {
@@ -168,6 +126,18 @@ export class DesktopBookmarkRepository implements BookmarkRepository {
 
   async retryMetadataExtraction(bookmarkId: string): Promise<BookmarkRecord> {
     return retryMetadataExtraction(bookmarkId);
+  }
+
+  async queueAiEnrichment(bookmarkId: string): Promise<BookmarkRecord> {
+    return queueAiEnrichment(bookmarkId);
+  }
+
+  async retryAiEnrichment(bookmarkId: string): Promise<BookmarkRecord> {
+    return retryAiEnrichment(bookmarkId);
+  }
+
+  async applyAiSuggestions(bookmarkId: string, input: ApplyAiSuggestionsInput): Promise<BookmarkRecord> {
+    return applyAiSuggestions(bookmarkId, input);
   }
 
   async listCategories(): Promise<CategoryTreeNode[]> {

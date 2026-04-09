@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BookmarkRecord, CategoryTreeNode, CollectionRecord, UpdateBookmarkPatch } from '@perchlink/core';
+import type { ApplyAiSuggestionsInput, BookmarkRecord, CategoryTreeNode, CollectionRecord, UpdateBookmarkPatch } from '@perchlink/core';
+import { mergeUserEditedMaskFromPatch } from '@perchlink/core';
+import { BookmarkAiSuggestionPanel } from './BookmarkAiSuggestionPanel';
 
 interface BookmarkDetailsDrawerProps {
   bookmark: BookmarkRecord | null;
@@ -11,6 +13,8 @@ interface BookmarkDetailsDrawerProps {
   onDelete: (bookmarkId: string) => Promise<void>;
   onSave: (bookmarkId: string, patch: UpdateBookmarkPatch) => Promise<void>;
   onRetry?: (bookmarkId: string) => Promise<void>;
+  onRetryAi?: (bookmarkId: string) => Promise<void>;
+  onApplyAi?: (bookmarkId: string, input: ApplyAiSuggestionsInput) => Promise<void>;
 }
 
 function flattenCategories(categories: CategoryTreeNode[]): CategoryTreeNode[] {
@@ -35,6 +39,8 @@ export function BookmarkDetailsDrawer({
   onDelete,
   onSave,
   onRetry,
+  onRetryAi,
+  onApplyAi,
 }: BookmarkDetailsDrawerProps) {
   const categoryOptions = useMemo(() => flattenCategories(categories), [categories]);
   const [title, setTitle] = useState('');
@@ -109,6 +115,14 @@ export function BookmarkDetailsDrawer({
         ) : null}
       </section>
 
+      <BookmarkAiSuggestionPanel
+        bookmark={bookmark}
+        categories={categories}
+        isBusy={isSaving}
+        onRetryAi={onRetryAi}
+        onApplyAi={onApplyAi}
+      />
+
       <section style={{ display: 'grid', gap: 'var(--space-md)' }}>
         <h3 style={{ margin: 0, fontSize: 'var(--type-heading)' }}>URL / title / description</h3>
         <label style={{ display: 'grid', gap: 'var(--space-sm)' }}>
@@ -179,15 +193,22 @@ export function BookmarkDetailsDrawer({
         <button
           type="button"
           onClick={() =>
-            void onSave(bookmark.id, {
-              title,
-              url,
-              description,
-              primaryCategoryId: categoryId,
-              isStarred,
-              tags: buildTagInput(tags),
-              collectionIds: selectedCollectionIds,
-            })
+            void onSave(bookmark.id, (() => {
+              const patch = {
+                title,
+                url,
+                description,
+                primaryCategoryId: categoryId,
+                isStarred,
+                tags: buildTagInput(tags),
+                collectionIds: selectedCollectionIds,
+              } satisfies UpdateBookmarkPatch;
+
+              return {
+                ...patch,
+                userEditedMask: mergeUserEditedMaskFromPatch(bookmark.userEditedMask, patch),
+              } satisfies UpdateBookmarkPatch;
+            })())
           }
           disabled={isSaving}
           style={saveButtonStyle}

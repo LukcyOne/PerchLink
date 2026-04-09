@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { BookmarkRecord } from '@perchlink/core';
+import { useTranslation } from 'react-i18next';
 import { IconButton } from '../primitives/IconButton';
 
 interface BookmarkCardProps {
@@ -30,12 +31,22 @@ const cardStyle: CSSProperties = {
 };
 
 export function BookmarkCard({ bookmark, primaryCategory, onSelect, onEdit, onToggleStar, onRetry }: BookmarkCardProps) {
+  const { t } = useTranslation();
   const processing_status = bookmark.processingStatus;
   const isPending = processing_status === 'pending';
   const isProcessing = processing_status === 'processing';
   const isFailed = processing_status === 'failed';
   const cover = bookmark.coverUrl;
   const description = bookmark.descriptionExcerpt ?? bookmark.description ?? 'No description yet.';
+  const aiStatus = bookmark.processingStatus === 'ready' ? bookmark.aiSuggestion?.status : null;
+  const aiHint =
+    aiStatus === 'running'
+      ? t('ai.analyzing')
+      : aiStatus === 'ready'
+        ? t('ai.ready')
+        : aiStatus === 'failed'
+          ? t('ai.failed')
+          : null;
 
   return (
     <article style={cardStyle}>
@@ -126,12 +137,22 @@ export function BookmarkCard({ bookmark, primaryCategory, onSelect, onEdit, onTo
           </div>
         </div>
       </button>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontSize: 'var(--type-label)' }}>primaryCategory: {primaryCategory ?? 'Unsorted'}</span>
-          <span style={{ fontSize: 'var(--type-label)' }}>Updated {formatBookmarkDate(bookmark.updatedAt)}</span>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-md)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', color: 'var(--color-text-muted)' }}>
+            <span style={{ fontSize: 'var(--type-label)' }}>primaryCategory: {primaryCategory ?? 'Unsorted'}</span>
+            <span style={{ fontSize: 'var(--type-label)' }}>Updated {formatBookmarkDate(bookmark.updatedAt)}</span>
+            {aiHint ? (
+              <span
+                style={{
+                  fontSize: 'var(--type-label)',
+                  color: aiStatus === 'failed' ? 'var(--color-destructive)' : 'var(--color-accent)',
+                }}
+              >
+                {aiHint}
+              </span>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
           <IconButton ariaLabel={bookmark.isStarred ? 'Unstar bookmark' : 'Star bookmark'} onClick={onToggleStar}>
             {bookmark.isStarred ? '★' : '☆'}
           </IconButton>

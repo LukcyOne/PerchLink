@@ -15,6 +15,27 @@ const enUS = {
     pageTitle: 'All Bookmarks',
     surfaceDescription: 'The shared shell is ready, and later feature pages will plug in here.',
   },
+  ai: {
+    panelTitle: 'AI Suggestions',
+    panelHelper: 'AI only creates draft suggestions. You decide whether they become saved fields.',
+    analyzing: 'AI analyzing...',
+    ready: 'AI suggestions ready',
+    failed: 'AI failed',
+    rerun: 'Regenerate AI Suggestions',
+    applyUntouched: 'Apply Untouched Fields',
+    replaceSelected: 'Replace Selected with AI',
+    protectedBadge: 'Manually edited, protected',
+    untouchedBadge: 'Ready to apply',
+    emptyState: 'After metadata completes, AI will suggest category, tags, and description here.',
+    failureDetail: 'No new suggestions were generated this time. Try again later.',
+    replaceConfirmation: 'This will replace the selected fields with new AI suggestions. Continue?',
+    currentValue: 'Current value',
+    proposal: 'AI proposal',
+    fieldCategory: 'Category',
+    fieldTags: 'Tags',
+    fieldDescription: 'Description',
+    noValue: 'None yet',
+  },
 } as const;
 
 export default enUS;

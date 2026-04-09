@@ -1,4 +1,5 @@
 export { BookmarkCard } from './BookmarkCard';
+export { BookmarkAiSuggestionPanel } from './BookmarkAiSuggestionPanel';
 export { BookmarkDetailsDrawer } from './BookmarkDetailsDrawer';
 export { BookmarkListRow } from './BookmarkListRow';
 export { BookmarkViewToggle } from './BookmarkViewToggle';

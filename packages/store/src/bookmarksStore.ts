@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import { mergeUserEditedMaskFromPatch } from '@perchlink/core';
 import type {
+  ApplyAiSuggestionsInput,
   BookmarkListQuery,
   BookmarkProcessingStatus,
   BookmarkRecord,
@@ -53,6 +55,9 @@ interface BookmarksState {
   loadBookmarks: (queryOverrides?: BookmarkListQuery) => Promise<BookmarkRecord[]>;
   queueMetadataExtraction: (bookmarkId: string) => Promise<BookmarkRecord>;
   retryMetadataExtraction: (bookmarkId: string) => Promise<BookmarkRecord>;
+  queueAiEnrichment: (bookmarkId: string) => Promise<BookmarkRecord>;
+  retryAiEnrichment: (bookmarkId: string) => Promise<BookmarkRecord>;
+  applyAiSuggestions: (bookmarkId: string, input: ApplyAiSuggestionsInput) => Promise<BookmarkRecord>;
   createBookmark: (input: CreateBookmarkInput) => Promise<BookmarkRecord>;
   updateBookmark: (bookmarkId: string, patch: UpdateBookmarkPatch) => Promise<BookmarkRecord>;
   deleteBookmark: (bookmarkId: string) => Promise<void>;
@@ -206,6 +211,9 @@ export const useBookmarksStore = create<BookmarksState>((set, get) => ({
     // Merge processing_status / processing_error updates returned from the desktop metadata queue.
     const bookmark = await repository.queueMetadataExtraction(bookmarkId);
     set((state) => ({ bookmarks: mergeBookmark(state.bookmarks, bookmark) }));
+    if (bookmark.processingStatus === 'ready') {
+      void get().queueAiEnrichment(bookmark.id);
+    }
     return bookmark;
   },
   retryMetadataExtraction: async (bookmarkId) => {
@@ -213,7 +221,36 @@ export const useBookmarksStore = create<BookmarksState>((set, get) => ({
     // Merge processing_status / processing_error updates returned from the desktop metadata retry path.
     const bookmark = await repository.retryMetadataExtraction(bookmarkId);
     set((state) => ({ bookmarks: mergeBookmark(state.bookmarks, bookmark) }));
+    if (bookmark.processingStatus === 'ready') {
+      void get().queueAiEnrichment(bookmark.id);
+    }
     return bookmark;
+  },
+  queueAiEnrichment: async (bookmarkId) => {
+    const repository = getRepository(get().repository);
+    const bookmark = await repository.queueAiEnrichment(bookmarkId);
+    set((state) => ({ bookmarks: mergeBookmark(state.bookmarks, bookmark) }));
+    return bookmark;
+  },
+  retryAiEnrichment: async (bookmarkId) => {
+    const repository = getRepository(get().repository);
+    const bookmark = await repository.retryAiEnrichment(bookmarkId);
+    set((state) => ({ bookmarks: mergeBookmark(state.bookmarks, bookmark) }));
+    return bookmark;
+  },
+  applyAiSuggestions: async (bookmarkId, input) => {
+    const repository = getRepository(get().repository);
+    set({ isSaving: true, error: null });
+
+    try {
+      const bookmark = await repository.applyAiSuggestions(bookmarkId, input);
+      set((state) => ({ bookmarks: mergeBookmark(state.bookmarks, bookmark), isSaving: false }));
+      await get().hydrateReferenceData();
+      return bookmark;
+    } catch (error) {
+      set({ isSaving: false, error: toErrorMessage(error) });
+      throw error;
+    }
   },
   createBookmark: async (input) => {
     const repository = getRepository(get().repository);
@@ -240,7 +277,15 @@ export const useBookmarksStore = create<BookmarksState>((set, get) => ({
     set({ isSaving: true, error: null });
 
     try {
-      const bookmark = await repository.updateBookmark(bookmarkId, patch);
+      const currentBookmark = get().bookmarks.find((bookmark) => bookmark.id === bookmarkId);
+      const normalizedPatch =
+        patch.userEditedMask || !currentBookmark
+          ? patch
+          : {
+              ...patch,
+              userEditedMask: mergeUserEditedMaskFromPatch(currentBookmark.userEditedMask, patch),
+            };
+      const bookmark = await repository.updateBookmark(bookmarkId, normalizedPatch);
       set((state) => ({ bookmarks: mergeBookmark(state.bookmarks, bookmark), isSaving: false }));
       await get().hydrateReferenceData();
       return bookmark;

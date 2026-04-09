@@ -54,6 +54,19 @@ pub struct CategoryTreeNodeDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BookmarkAiSuggestionDto {
+    pub run_id: String,
+    pub status: String,
+    pub proposed_primary_category_id: Option<String>,
+    pub proposed_description: Option<String>,
+    pub proposed_tags: Vec<String>,
+    pub last_error: Option<String>,
+    pub generated_at: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BookmarkRecordDto {
     pub id: String,
     pub url: String,
@@ -70,6 +83,7 @@ pub struct BookmarkRecordDto {
     pub processing_status: String,
     pub processing_error: Option<String>,
     pub user_edited_mask: Vec<String>,
+    pub ai_suggestion: Option<BookmarkAiSuggestionDto>,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -515,7 +529,7 @@ pub(crate) fn list_bookmarks(connection: &Connection, query: BookmarkListQueryDt
     basic_rows.into_iter().map(|row| hydrate_bookmark(connection, row)).collect()
 }
 
-fn update_bookmark(
+pub(crate) fn update_bookmark(
     connection: &Connection,
     bookmark_id: &str,
     patch: UpdateBookmarkPatchDto,
@@ -623,7 +637,7 @@ fn delete_bookmark(connection: &Connection, bookmark_id: &str) -> Result<(), DbE
     Ok(())
 }
 
-fn list_categories(connection: &Connection) -> Result<Vec<CategoryTreeNodeDto>, DbError> {
+pub(crate) fn list_categories(connection: &Connection) -> Result<Vec<CategoryTreeNodeDto>, DbError> {
     let mut statement = connection.prepare(
         "
         SELECT
@@ -831,7 +845,7 @@ fn delete_collection(connection: &Connection, collection_id: &str) -> Result<(),
     Ok(())
 }
 
-fn replace_bookmark_tags(
+pub(crate) fn replace_bookmark_tags(
     connection: &Connection,
     bookmark_id: &str,
     tags: &[TagInputDto],
@@ -922,7 +936,7 @@ fn replace_collection_memberships(
     Ok(())
 }
 
-fn refresh_bookmark_search(connection: &Connection, bookmark_id: &str) -> Result<(), DbError> {
+pub(crate) fn refresh_bookmark_search(connection: &Connection, bookmark_id: &str) -> Result<(), DbError> {
     connection.execute("DELETE FROM bookmark_search WHERE bookmark_id = ?1", [bookmark_id])?;
 
     let searchable = connection
@@ -968,6 +982,7 @@ fn hydrate_bookmark(connection: &Connection, row: BasicBookmarkRow) -> Result<Bo
     let tags = load_tags_for_bookmark(connection, &row.id)?;
     let collection_ids = load_collection_ids_for_bookmark(connection, &row.id)?;
     let user_edited_mask = serde_json::from_str::<Vec<String>>(&row.user_edited_mask).unwrap_or_default();
+    let ai_suggestion = load_ai_suggestion_for_bookmark(connection, &row.id)?;
 
     Ok(BookmarkRecordDto {
         id: row.id,
@@ -985,10 +1000,51 @@ fn hydrate_bookmark(connection: &Connection, row: BasicBookmarkRow) -> Result<Bo
         processing_status: row.processing_status,
         processing_error: row.processing_error,
         user_edited_mask,
+        ai_suggestion,
         created_at: row.created_at,
         updated_at: row.updated_at,
         deleted_at: row.deleted_at,
     })
+}
+
+fn load_ai_suggestion_for_bookmark(
+    connection: &Connection,
+    bookmark_id: &str,
+) -> Result<Option<BookmarkAiSuggestionDto>, DbError> {
+    connection
+        .query_row(
+            "
+            SELECT
+              run_id,
+              status,
+              proposed_primary_category_id,
+              proposed_description,
+              proposed_tags_json,
+              last_error,
+              generated_at,
+              updated_at
+            FROM bookmark_ai_suggestions
+            WHERE bookmark_id = ?1
+            ",
+            [bookmark_id],
+            |row| {
+                let proposed_tags_json = row.get::<_, String>(4)?;
+                let proposed_tags = serde_json::from_str::<Vec<String>>(&proposed_tags_json).unwrap_or_default();
+
+                Ok(BookmarkAiSuggestionDto {
+                    run_id: row.get(0)?,
+                    status: row.get(1)?,
+                    proposed_primary_category_id: row.get(2)?,
+                    proposed_description: row.get(3)?,
+                    proposed_tags,
+                    last_error: row.get(5)?,
+                    generated_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(DbError::from)
 }
 
 fn load_tags_for_bookmark(connection: &Connection, bookmark_id: &str) -> Result<Vec<TagRecordDto>, DbError> {

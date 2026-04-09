@@ -1,6 +1,8 @@
 export const BOOKMARK_PROCESSING_STATUSES = ['pending', 'processing', 'ready', 'failed'] as const;
+export const BOOKMARK_AI_STATUSES = ['idle', 'running', 'ready', 'failed'] as const;
 
 export type BookmarkProcessingStatus = (typeof BOOKMARK_PROCESSING_STATUSES)[number];
+export type BookmarkAiStatus = (typeof BOOKMARK_AI_STATUSES)[number];
 export type BookmarkSortField = 'createdAt' | 'updatedAt' | 'title';
 export type SortDirection = 'asc' | 'desc';
 export type BookmarkEditableField =
@@ -11,6 +13,8 @@ export type BookmarkEditableField =
   | 'primaryCategoryId'
   | 'tags'
   | 'collectionIds';
+
+export const AI_MANAGED_BOOKMARK_FIELDS: BookmarkEditableField[] = ['primaryCategoryId', 'tags', 'description'];
 
 export interface TagInput {
   id?: string;
@@ -49,6 +53,17 @@ export interface CategoryTreeNode {
   children: CategoryTreeNode[];
 }
 
+export interface BookmarkAiSuggestionRecord {
+  status: BookmarkAiStatus;
+  runId: string;
+  proposedPrimaryCategoryId: string | null;
+  proposedDescription: string | null;
+  proposedTags: string[];
+  lastError: string | null;
+  generatedAt: string | null;
+  updatedAt: string;
+}
+
 export interface BookmarkRecord {
   id: string;
   url: string;
@@ -65,6 +80,7 @@ export interface BookmarkRecord {
   processingStatus: BookmarkProcessingStatus;
   processingError: string | null;
   userEditedMask: BookmarkEditableField[];
+  aiSuggestion: BookmarkAiSuggestionRecord | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -130,6 +146,11 @@ export interface SaveCollectionInput {
   sortOrder?: number;
 }
 
+export interface ApplyAiSuggestionsInput {
+  applyUntouched: boolean;
+  replaceFields: BookmarkEditableField[];
+}
+
 export function normalizeBookmarkUrl(input: string): string {
   const trimmed = input.trim();
 
@@ -165,5 +186,34 @@ export function normalizeBookmarkUrl(input: string): string {
   }
 
   return `${scheme}://${authority}${normalizedPath}${query}`;
+}
+
+export function mergeUserEditedMaskFromPatch(
+  currentMask: BookmarkEditableField[],
+  patch: UpdateBookmarkPatch,
+): BookmarkEditableField[] {
+  const nextMask = new Set(currentMask);
+
+  if ('title' in patch && patch.title !== undefined) {
+    nextMask.add('title');
+  }
+
+  if ('description' in patch && patch.description !== undefined) {
+    nextMask.add('description');
+  }
+
+  if ('primaryCategoryId' in patch && patch.primaryCategoryId !== undefined) {
+    nextMask.add('primaryCategoryId');
+  }
+
+  if ('tags' in patch && patch.tags !== undefined) {
+    nextMask.add('tags');
+  }
+
+  if ('collectionIds' in patch && patch.collectionIds !== undefined) {
+    nextMask.add('collectionIds');
+  }
+
+  return [...nextMask];
 }
 

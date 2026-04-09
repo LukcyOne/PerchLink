@@ -34,6 +34,9 @@ export function CategoriesPage() {
     createBookmark,
     updateBookmark,
     deleteBookmark,
+    retryMetadataExtraction,
+    retryAiEnrichment,
+    applyAiSuggestions,
     openDetails,
     closeDetails,
     closeQuickAdd,
@@ -153,6 +156,15 @@ export function CategoriesPage() {
         onDelete={deleteBookmark}
         onSave={async (bookmarkId, patch) => {
           await updateBookmark(bookmarkId, patch);
+        }}
+        onRetry={async (bookmarkId) => {
+          await retryMetadataExtraction(bookmarkId);
+        }}
+        onRetryAi={async (bookmarkId) => {
+          await retryAiEnrichment(bookmarkId);
+        }}
+        onApplyAi={async (bookmarkId, input) => {
+          await applyAiSuggestions(bookmarkId, input);
         }}
       />
     </div>

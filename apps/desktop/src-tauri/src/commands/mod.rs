@@ -1,7 +1,9 @@
+pub mod ai;
 pub mod bookmarks;
 pub mod metadata;
 pub mod search;
 
+pub use ai::{desktop_apply_ai_suggestions, desktop_queue_ai_enrichment, desktop_retry_ai_enrichment};
 pub use bookmarks::{
     desktop_create_bookmark, desktop_delete_bookmark, desktop_delete_category,
     desktop_delete_collection, desktop_get_bookmark, desktop_list_bookmarks, desktop_list_categories,

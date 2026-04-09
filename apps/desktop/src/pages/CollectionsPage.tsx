@@ -30,6 +30,9 @@ export function CollectionsPage() {
     createBookmark,
     updateBookmark,
     deleteBookmark,
+    retryMetadataExtraction,
+    retryAiEnrichment,
+    applyAiSuggestions,
     openDetails,
     closeDetails,
     closeQuickAdd,
@@ -178,6 +181,15 @@ export function CollectionsPage() {
         onDelete={deleteBookmark}
         onSave={async (bookmarkId, patch) => {
           await updateBookmark(bookmarkId, patch);
+        }}
+        onRetry={async (bookmarkId) => {
+          await retryMetadataExtraction(bookmarkId);
+        }}
+        onRetryAi={async (bookmarkId) => {
+          await retryAiEnrichment(bookmarkId);
+        }}
+        onApplyAi={async (bookmarkId, input) => {
+          await applyAiSuggestions(bookmarkId, input);
         }}
       />
     </div>

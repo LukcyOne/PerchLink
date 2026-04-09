@@ -1,4 +1,5 @@
 import type {
+  ApplyAiSuggestionsInput,
   BookmarkListQuery,
   BookmarkProcessingStatus,
   BookmarkRecord,
@@ -23,6 +24,9 @@ export interface BookmarkRepository {
   filterBookmarks(query: BookmarkSearchQuery): Promise<BookmarkRecord[]>;
   queueMetadataExtraction(bookmarkId: string): Promise<BookmarkRecord>;
   retryMetadataExtraction(bookmarkId: string): Promise<BookmarkRecord>;
+  queueAiEnrichment(bookmarkId: string): Promise<BookmarkRecord>;
+  retryAiEnrichment(bookmarkId: string): Promise<BookmarkRecord>;
+  applyAiSuggestions(bookmarkId: string, input: ApplyAiSuggestionsInput): Promise<BookmarkRecord>;
   listCategories(): Promise<CategoryTreeNode[]>;
   saveCategory(input: SaveCategoryInput): Promise<CategoryTreeNode>;
   deleteCategory(categoryId: string): Promise<void>;

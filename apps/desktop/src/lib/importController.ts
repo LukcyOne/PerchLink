@@ -38,7 +38,11 @@ async function importBookmarksHtml(repository: BookmarkRepository, html: string)
       knownNormalizedUrls.add(normalized_url);
       importedBookmarks.push(bookmark);
       successCount += 1;
-      void repository.queueMetadataExtraction(bookmark.id);
+      void repository.queueMetadataExtraction(bookmark.id).then((result) => {
+        if (result.processingStatus === 'ready') {
+          void repository.queueAiEnrichment(result.id);
+        }
+      });
     } catch {
       failedCount += 1;
     }

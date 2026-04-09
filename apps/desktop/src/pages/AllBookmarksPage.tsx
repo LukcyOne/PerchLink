@@ -55,6 +55,8 @@ export function BookmarksBrowseWorkspace({ scope }: BookmarksBrowseWorkspaceProp
     updateBookmark,
     deleteBookmark,
     retryMetadataExtraction,
+    retryAiEnrichment,
+    applyAiSuggestions,
   } = useBookmarksStore();
   const [importProgress, setImportProgress] = useState<ImportProgressResult>({
     successCount: 0,
@@ -234,6 +236,12 @@ export function BookmarksBrowseWorkspace({ scope }: BookmarksBrowseWorkspaceProp
         }}
         onRetry={async (bookmarkId) => {
           await retryMetadataExtraction(bookmarkId);
+        }}
+        onRetryAi={async (bookmarkId) => {
+          await retryAiEnrichment(bookmarkId);
+        }}
+        onApplyAi={async (bookmarkId, input) => {
+          await applyAiSuggestions(bookmarkId, input);
         }}
       />
     </div>

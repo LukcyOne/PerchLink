@@ -15,6 +15,27 @@ const zhCN = {
     pageTitle: '所有书签',
     surfaceDescription: '共享壳层已经就绪，后续功能页会接入这里。',
   },
+  ai: {
+    panelTitle: 'AI 建议',
+    panelHelper: 'AI 只会生成建议稿，是否写入正式字段由你决定。',
+    analyzing: 'AI 正在生成建议...',
+    ready: 'AI 建议已准备好',
+    failed: 'AI 建议失败',
+    rerun: '重新生成 AI 建议',
+    applyUntouched: '应用未手动修改字段',
+    replaceSelected: '用 AI 替换所选字段',
+    protectedBadge: '手动修改，默认保护',
+    untouchedBadge: '可直接应用',
+    emptyState: '元数据完成后，AI 会在这里提供分类、标签和描述建议。',
+    failureDetail: '这次没有生成新建议，你可以稍后重新尝试。',
+    replaceConfirmation: '这会用新的 AI 建议替换你选中的字段，是否继续？',
+    currentValue: '当前内容',
+    proposal: 'AI 建议',
+    fieldCategory: '分类',
+    fieldTags: '标签',
+    fieldDescription: '描述',
+    noValue: '暂无',
+  },
 } as const;
 
 export default zhCN;

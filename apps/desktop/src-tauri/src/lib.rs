@@ -1,8 +1,10 @@
+mod ai;
 mod commands;
 mod db;
 mod metadata;
 
 use commands::{
+    desktop_apply_ai_suggestions, desktop_queue_ai_enrichment, desktop_retry_ai_enrichment,
     desktop_create_bookmark, desktop_delete_bookmark, desktop_delete_category,
     desktop_delete_collection, desktop_filter_bookmarks, desktop_get_bookmark,
     desktop_list_bookmarks, desktop_list_categories, desktop_list_collections,
@@ -31,6 +33,9 @@ pub fn run() {
             desktop_filter_bookmarks,
             desktop_queue_metadata_extraction,
             desktop_retry_metadata_extraction,
+            desktop_queue_ai_enrichment,
+            desktop_retry_ai_enrichment,
+            desktop_apply_ai_suggestions,
             desktop_update_bookmark,
             desktop_delete_bookmark,
             desktop_list_categories,

@@ -1,4 +1,5 @@
 import type { BookmarkRecord } from '@perchlink/core';
+import { useTranslation } from 'react-i18next';
 import { IconButton } from '../primitives/IconButton';
 
 interface BookmarkListRowProps {
@@ -11,9 +12,19 @@ interface BookmarkListRowProps {
 }
 
 export function BookmarkListRow({ bookmark, primaryCategory, onSelect, onEdit, onToggleStar, onRetry }: BookmarkListRowProps) {
+  const { t } = useTranslation();
   const processing_status = bookmark.processingStatus;
   const statusLabel = processing_status === 'failed' ? 'failed' : processing_status === 'pending' ? 'pending' : processing_status === 'processing' ? 'processing' : 'ready';
   const description = bookmark.descriptionExcerpt ?? bookmark.description ?? 'No description yet.';
+  const aiStatus = bookmark.processingStatus === 'ready' ? bookmark.aiSuggestion?.status : null;
+  const aiHint =
+    aiStatus === 'running'
+      ? t('ai.analyzing')
+      : aiStatus === 'ready'
+        ? t('ai.ready')
+        : aiStatus === 'failed'
+          ? t('ai.failed')
+          : null;
 
   return (
     <article
@@ -53,6 +64,11 @@ export function BookmarkListRow({ bookmark, primaryCategory, onSelect, onEdit, o
         <span style={{ fontSize: 'var(--type-label)', color: processing_status === 'failed' ? 'var(--color-destructive)' : 'var(--color-text-muted)' }}>
           {statusLabel}
         </span>
+        {aiHint ? (
+          <span style={{ fontSize: 'var(--type-label)', color: aiStatus === 'failed' ? 'var(--color-destructive)' : 'var(--color-accent)' }}>
+            {aiHint}
+          </span>
+        ) : null}
         {processing_status === 'failed' && bookmark.processingError ? (
           <span style={{ fontSize: 'var(--type-label)', color: 'var(--color-destructive)' }}>{bookmark.processingError}</span>
         ) : null}
