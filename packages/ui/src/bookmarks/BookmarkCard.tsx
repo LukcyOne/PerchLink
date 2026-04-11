@@ -89,7 +89,7 @@ export function BookmarkCard({ bookmark, primaryCategory, onSelect, onEdit, onTo
               color: 'var(--color-text-muted)',
             }}
           >
-            Local bookmark preview
+            Bookmark preview
           </div>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
@@ -174,7 +174,7 @@ export function BookmarkCard({ bookmark, primaryCategory, onSelect, onEdit, onTo
             fontWeight: 'var(--weight-semibold)',
           }}
         >
-          Extracting page details locally...
+          Extracting page details...
         </div>
       )}
       {isFailed && (

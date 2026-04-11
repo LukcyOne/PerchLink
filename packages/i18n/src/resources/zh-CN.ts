@@ -36,6 +36,25 @@ const zhCN = {
     fieldDescription: '描述',
     noValue: '暂无',
   },
+  remote: {
+    signInTitle: '登录你的远程书签库',
+    signInHelper: '使用你的单用户账户进入 Web 管理界面。',
+    accountField: '账户',
+    passwordField: '密码',
+    signInAction: '登录',
+    setupTitle: '初始化远程账户',
+    setupHelper: '只需要完成一次初始化，之后这个入口会自动关闭。',
+    setupAction: '创建管理员账户',
+    setupClosed: '远程账户已经初始化，请直接登录。',
+    setupLinkPrompt: '还没有初始化？',
+    quickAddHelper: '书签会先保存到远程服务，再继续提取页面信息。',
+    refreshAction: '刷新远程数据',
+    refreshSuccess: '已更新到最新远程结果',
+    authFailure: '账户或密码不正确，请重试。',
+    sessionExpired: '登录状态已过期，请重新登录。',
+    emptyHeading: '从第一条远程书签开始建立你的在线书签库',
+    emptyBody: '添加一个网址后，它会立即保存到远程服务，并在后台继续补全信息。',
+  },
 } as const;
 
 export default zhCN;

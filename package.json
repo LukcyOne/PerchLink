@@ -5,13 +5,15 @@
   "scripts": {
     "dev:web": "pnpm --filter @perchlink/web dev",
     "dev:desktop": "pnpm --filter @perchlink/desktop dev",
+    "dev:api": "pnpm --filter @perchlink/api dev",
     "typecheck": "pnpm -r exec tsc --noEmit",
     "test": "pnpm exec vitest run --passWithNoTests",
     "check:desktop-rust": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "test:desktop-rust": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "lint": "pnpm exec eslint .",
     "build:web": "pnpm --filter @perchlink/web build",
-    "build:desktop": "pnpm --filter @perchlink/desktop build"
+    "build:desktop": "pnpm --filter @perchlink/desktop build",
+    "build:api": "pnpm --filter @perchlink/api build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -25,5 +27,11 @@
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
     "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }

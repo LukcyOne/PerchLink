@@ -7,6 +7,7 @@ interface TopBarProps {
   primaryActionLabel?: string;
   onPrimaryAction?: () => void;
   utilities?: ReactNode;
+  leadingControl?: ReactNode;
 }
 
 const topBarStyle: CSSProperties = {
@@ -25,7 +26,7 @@ const primaryActionFallback = {
   'en-US': 'Add Bookmark',
 } as const;
 
-export function TopBar({ title, primaryActionLabel, onPrimaryAction, utilities }: TopBarProps) {
+export function TopBar({ title, primaryActionLabel, onPrimaryAction, utilities, leadingControl }: TopBarProps) {
   const { t } = useTranslation();
   const { locale, setLocale } = useLocale();
   const resolvedPrimaryAction = primaryActionLabel ?? t('shell.primaryCta', { defaultValue: primaryActionFallback[locale] });
@@ -33,6 +34,7 @@ export function TopBar({ title, primaryActionLabel, onPrimaryAction, utilities }
   return (
     <header style={topBarStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+        {leadingControl}
         <h1 style={{ margin: 0, fontSize: 'var(--type-heading)', fontWeight: 'var(--weight-semibold)' }}>{title}</h1>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>

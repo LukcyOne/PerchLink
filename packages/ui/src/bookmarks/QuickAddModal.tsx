@@ -4,6 +4,12 @@ interface QuickAddModalProps {
   isOpen: boolean;
   isSubmitting?: boolean;
   errorMessage?: string | null;
+  titleText?: string;
+  helperText?: string;
+  placeholder?: string;
+  submitLabel?: string;
+  cancelLabel?: string;
+  invalidUrlMessage?: string;
   onClose: () => void;
   onSubmit: (url: string) => Promise<void>;
 }
@@ -17,7 +23,19 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-export function QuickAddModal({ isOpen, isSubmitting = false, errorMessage, onClose, onSubmit }: QuickAddModalProps) {
+export function QuickAddModal({
+  isOpen,
+  isSubmitting = false,
+  errorMessage,
+  titleText = 'Add Link',
+  helperText = 'The link is saved locally first, then the app continues extracting title, cover, and description.',
+  placeholder = 'https://example.com',
+  submitLabel = 'Add Bookmark',
+  cancelLabel = 'Cancel',
+  invalidUrlMessage = 'Please enter a valid http or https URL.',
+  onClose,
+  onSubmit,
+}: QuickAddModalProps) {
   const [url, setUrl] = useState('');
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
 
@@ -34,7 +52,7 @@ export function QuickAddModal({ isOpen, isSubmitting = false, errorMessage, onCl
 
   const handleSubmit = async () => {
     if (!isValidUrl(url)) {
-      setValidationMessage('Please enter a valid http or https URL.');
+      setValidationMessage(invalidUrlMessage);
       return;
     }
 
@@ -76,10 +94,10 @@ export function QuickAddModal({ isOpen, isSubmitting = false, errorMessage, onCl
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-md)' }}>
           <div>
             <h2 id="quick-add-title" style={{ margin: 0, fontSize: 'var(--type-display)' }}>
-              Add Link
+              {titleText}
             </h2>
             <p style={{ margin: 'var(--space-sm) 0 0', color: 'var(--color-text-muted)' }}>
-              The link is saved locally first, then the app continues extracting title, cover, and description.
+              {helperText}
             </p>
           </div>
           <button
@@ -97,7 +115,7 @@ export function QuickAddModal({ isOpen, isSubmitting = false, errorMessage, onCl
             type="url"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://example.com"
+            placeholder={placeholder}
             style={{
               width: '100%',
               borderRadius: 'var(--radius-md)',
@@ -121,7 +139,7 @@ export function QuickAddModal({ isOpen, isSubmitting = false, errorMessage, onCl
               cursor: 'pointer',
             }}
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             type="button"
@@ -137,7 +155,7 @@ export function QuickAddModal({ isOpen, isSubmitting = false, errorMessage, onCl
               cursor: 'pointer',
             }}
           >
-            {isSubmitting ? 'Saving...' : 'Add Bookmark'}
+            {isSubmitting ? 'Saving...' : submitLabel}
           </button>
         </div>
       </section>

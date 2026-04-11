@@ -36,6 +36,25 @@ const enUS = {
     fieldDescription: 'Description',
     noValue: 'None yet',
   },
+  remote: {
+    signInTitle: 'Sign In to Your Remote Library',
+    signInHelper: 'Use your single-user account to enter the Web workspace.',
+    accountField: 'Account',
+    passwordField: 'Password',
+    signInAction: 'Sign In',
+    setupTitle: 'Set Up the Remote Account',
+    setupHelper: 'This setup is only needed once. The entry closes automatically afterward.',
+    setupAction: 'Create Admin Account',
+    setupClosed: 'The remote account is already set up. Please sign in.',
+    setupLinkPrompt: 'Need to set it up first?',
+    quickAddHelper: 'The bookmark is saved to the remote service first, then the app continues extracting page details.',
+    refreshAction: 'Refresh Remote Data',
+    refreshSuccess: 'Remote results are up to date',
+    authFailure: 'The account or password is incorrect. Try again.',
+    sessionExpired: 'Your session has expired. Please sign in again.',
+    emptyHeading: 'Start Your Remote Library with the First Bookmark',
+    emptyBody: 'Add a link and it will save to the remote service immediately, then finish filling in the details in the background.',
+  },
 } as const;
 
 export default enUS;

@@ -9,6 +9,8 @@ interface BookmarkDetailsDrawerProps {
   collections: CollectionRecord[];
   isOpen: boolean;
   isSaving?: boolean;
+  showAiPanel?: boolean;
+  layout?: 'drawer' | 'responsive';
   onClose: () => void;
   onDelete: (bookmarkId: string) => Promise<void>;
   onSave: (bookmarkId: string, patch: UpdateBookmarkPatch) => Promise<void>;
@@ -35,6 +37,8 @@ export function BookmarkDetailsDrawer({
   collections,
   isOpen,
   isSaving = false,
+  showAiPanel = true,
+  layout = 'drawer',
   onClose,
   onDelete,
   onSave,
@@ -50,6 +54,9 @@ export function BookmarkDetailsDrawer({
   const [tags, setTags] = useState('');
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   const [isStarred, setIsStarred] = useState(false);
+  const [isCompactLayout, setIsCompactLayout] = useState(() =>
+    typeof window !== 'undefined' && layout === 'responsive' ? window.innerWidth < 1024 : false,
+  );
 
   useEffect(() => {
     if (!bookmark) {
@@ -65,9 +72,25 @@ export function BookmarkDetailsDrawer({
     setIsStarred(bookmark.isStarred);
   }, [bookmark]);
 
+  useEffect(() => {
+    if (layout !== 'responsive' || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleResize = () => {
+      setIsCompactLayout(window.innerWidth < 1024);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [layout]);
+
   if (!isOpen || !bookmark) {
     return null;
   }
+
+  const shouldRenderAiPanel = showAiPanel && (Boolean(onRetryAi) || Boolean(onApplyAi) || Boolean(bookmark.aiSuggestion));
 
   return (
     <aside
@@ -76,15 +99,16 @@ export function BookmarkDetailsDrawer({
       aria-label="Bookmark details drawer"
       style={{
         position: 'fixed',
-        inset: '0 0 0 auto',
-        width: 'min(480px, 100vw)',
+        inset: isCompactLayout ? '0' : '0 0 0 auto',
+        width: isCompactLayout ? '100vw' : 'min(480px, 100vw)',
+        height: isCompactLayout ? '100vh' : undefined,
         background: 'var(--color-surface-raised)',
-        borderLeft: '1px solid var(--color-border-subtle)',
+        borderLeft: isCompactLayout ? 'none' : '1px solid var(--color-border-subtle)',
         padding: 'var(--space-xl)',
         display: 'flex',
         flexDirection: 'column',
         gap: 'var(--space-lg)',
-        boxShadow: '-12px 0 28px rgba(31, 42, 36, 0.12)',
+        boxShadow: isCompactLayout ? '0 -6px 28px rgba(31, 42, 36, 0.12)' : '-12px 0 28px rgba(31, 42, 36, 0.12)',
         zIndex: 30,
         overflowY: 'auto',
       }}
@@ -115,13 +139,15 @@ export function BookmarkDetailsDrawer({
         ) : null}
       </section>
 
-      <BookmarkAiSuggestionPanel
-        bookmark={bookmark}
-        categories={categories}
-        isBusy={isSaving}
-        onRetryAi={onRetryAi}
-        onApplyAi={onApplyAi}
-      />
+      {shouldRenderAiPanel ? (
+        <BookmarkAiSuggestionPanel
+          bookmark={bookmark}
+          categories={categories}
+          isBusy={isSaving}
+          onRetryAi={onRetryAi}
+          onApplyAi={onApplyAi}
+        />
+      ) : null}
 
       <section style={{ display: 'grid', gap: 'var(--space-md)' }}>
         <h3 style={{ margin: 0, fontSize: 'var(--type-heading)' }}>URL / title / description</h3>
