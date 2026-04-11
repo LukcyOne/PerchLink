@@ -6,6 +6,7 @@ use tauri::State;
 use crate::{
     db::{DatabaseState, DbError},
     metadata::extract_metadata,
+    sync::{enqueue_bookmark_sync_change, sync_operation_upsert, SyncWriterKind},
 };
 
 use super::bookmarks::{get_bookmark, BookmarkRecordDto};
@@ -31,13 +32,14 @@ async fn process_metadata(
     bookmark_id: String,
 ) -> Result<BookmarkRecordDto, DbError> {
     let bookmark_url = {
-        let connection = state.open_connection()?;
-        let url = connection.query_row(
+        let mut connection = state.open_connection()?;
+        let transaction = connection.transaction()?;
+        let url = transaction.query_row(
             "SELECT url FROM bookmarks WHERE id = ?1",
             [bookmark_id.as_str()],
             |row| row.get::<_, String>(0),
         )?;
-        connection.execute(
+        transaction.execute(
             "
             UPDATE bookmarks
             SET processing_status = 'processing',
@@ -47,13 +49,28 @@ async fn process_metadata(
             ",
             [bookmark_id.as_str()],
         )?;
+        enqueue_bookmark_sync_change(
+            &transaction,
+            bookmark_id.as_str(),
+            sync_operation_upsert(),
+            SyncWriterKind::System,
+            &["processingStatus", "processingError"],
+        )?;
+        transaction.commit()?;
         url
     };
 
     match extract_metadata(&bookmark_url).await {
         Ok(metadata) => {
-            let connection = state.open_connection()?;
-            connection.execute(
+            let mut connection = state.open_connection()?;
+            let transaction = connection.transaction()?;
+            let current_bookmark = get_bookmark(&transaction, bookmark_id.as_str())?
+                .ok_or(DbError::BookmarkNotFound(bookmark_id.clone()))?;
+            let should_replace_title =
+                current_bookmark.user_edited_mask.iter().all(|field| field != "title")
+                    || current_bookmark.title.is_empty()
+                    || current_bookmark.title == current_bookmark.url;
+            transaction.execute(
                 "
                 UPDATE bookmarks
                 SET title = CASE
@@ -79,13 +96,26 @@ async fn process_metadata(
                     metadata.cover_url,
                 ],
             )?;
-
-            get_bookmark(&connection, bookmark_id.as_str())?
-                .ok_or(DbError::BookmarkNotFound(bookmark_id))
+            let mut changed_fields = vec!["description", "favicon", "coverUrl", "processingStatus", "processingError"];
+            if should_replace_title {
+                changed_fields.push("title");
+            }
+            enqueue_bookmark_sync_change(
+                &transaction,
+                bookmark_id.as_str(),
+                sync_operation_upsert(),
+                SyncWriterKind::System,
+                &changed_fields,
+            )?;
+            let bookmark = get_bookmark(&transaction, bookmark_id.as_str())?
+                .ok_or(DbError::BookmarkNotFound(bookmark_id.clone()))?;
+            transaction.commit()?;
+            Ok(bookmark)
         }
         Err(error) => {
-            let connection = state.open_connection()?;
-            connection.execute(
+            let mut connection = state.open_connection()?;
+            let transaction = connection.transaction()?;
+            transaction.execute(
                 "
                 UPDATE bookmarks
                 SET processing_status = 'failed',
@@ -95,9 +125,17 @@ async fn process_metadata(
                 ",
                 params![bookmark_id.as_str(), error.to_string()],
             )?;
-
-            get_bookmark(&connection, bookmark_id.as_str())?
-                .ok_or(DbError::BookmarkNotFound(bookmark_id))
+            enqueue_bookmark_sync_change(
+                &transaction,
+                bookmark_id.as_str(),
+                sync_operation_upsert(),
+                SyncWriterKind::System,
+                &["processingStatus", "processingError"],
+            )?;
+            let bookmark = get_bookmark(&transaction, bookmark_id.as_str())?
+                .ok_or(DbError::BookmarkNotFound(bookmark_id.clone()))?;
+            transaction.commit()?;
+            Ok(bookmark)
         }
     }
 }

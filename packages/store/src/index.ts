@@ -8,6 +8,7 @@ export {
 export type { BookmarkViewMode } from './bookmarkViewPreferences';
 export type { BookmarkFilters } from './bookmarksStore';
 export { useBookmarksStore } from './bookmarksStore';
+export { useSyncStore } from './syncStore';
 export {
   DEFAULT_UI_LOCALE,
   SUPPORTED_UI_LOCALES,

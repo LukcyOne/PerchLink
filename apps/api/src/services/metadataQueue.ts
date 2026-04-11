@@ -1,14 +1,9 @@
 import { URL } from 'node:url';
 import type { RemoteDatabase } from '../db/client.js';
+import { loadBookmarkSyncSnapshot } from './syncEvents.js';
+import { upsertBookmarkCanonical } from './syncMutations.js';
 
 const inFlightJobs = new Set<string>();
-
-interface BookmarkMetadataRow {
-  id: string;
-  url: string;
-  title: string;
-  user_edited_mask: string;
-}
 
 function formatTitleFromUrl(input: string): string {
   try {
@@ -49,18 +44,16 @@ function buildDescriptionExcerpt(input: string): string {
   }
 }
 
-function queueJob(bookmarkId: string, db: RemoteDatabase, force: boolean): void {
-  const bookmark = db
-    .prepare(
-      `
-        SELECT id, url, title, user_edited_mask
-        FROM bookmarks
-        WHERE id = ? AND deleted_at IS NULL
-      `,
-    )
-    .get(bookmarkId) as BookmarkMetadataRow | undefined;
+function loadAccountId(db: RemoteDatabase): string | null {
+  const row = db.prepare('SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1').get() as { id: string } | undefined;
+  return row?.id ?? null;
+}
 
-  if (!bookmark) {
+function queueJob(bookmarkId: string, db: RemoteDatabase, force: boolean): void {
+  const accountId = loadAccountId(db);
+  const bookmark = loadBookmarkSyncSnapshot(db, bookmarkId);
+
+  if (!accountId || !bookmark || bookmark.deletedAt) {
     return;
   }
 
@@ -68,60 +61,74 @@ function queueJob(bookmarkId: string, db: RemoteDatabase, force: boolean): void 
     return;
   }
 
-  const now = new Date().toISOString();
-  db.prepare(
-    `
-      UPDATE bookmarks
-      SET processing_status = 'processing',
-          processing_error = NULL,
-          updated_at = ?,
-          version = version + 1
-      WHERE id = ?
-    `,
-  ).run(now, bookmarkId);
+  db.transaction(() => {
+    upsertBookmarkCanonical({
+      db,
+      accountId,
+      snapshot: {
+        ...bookmark,
+        processingStatus: 'processing',
+        processingError: null,
+      },
+      writerKind: 'system',
+      actorDeviceId: null,
+      changedFields: ['processingStatus', 'processingError'],
+    });
+  })();
 
   inFlightJobs.add(bookmarkId);
 
   setTimeout(() => {
     try {
-      const userEditedMask = JSON.parse(bookmark.user_edited_mask || '[]') as string[];
-      const derivedTitle = formatTitleFromUrl(bookmark.url);
-      const nextNow = new Date().toISOString();
+      const currentBookmark = loadBookmarkSyncSnapshot(db, bookmarkId);
+
+      if (!currentBookmark || currentBookmark.deletedAt) {
+        return;
+      }
+
+      const userEditedMask = currentBookmark.userEditedMask;
+      const derivedTitle = formatTitleFromUrl(currentBookmark.url);
 
       const shouldReplaceTitle =
-        force || !userEditedMask.includes('title') || !bookmark.title || bookmark.title === bookmark.url;
+        force || !userEditedMask.includes('title') || !currentBookmark.title || currentBookmark.title === currentBookmark.url;
 
-      db.prepare(
-        `
-          UPDATE bookmarks
-          SET title = ?,
-              description_excerpt = ?,
-              favicon = ?,
-              cover_url = NULL,
-              processing_status = 'ready',
-              processing_error = NULL,
-              updated_at = ?,
-              version = version + 1
-          WHERE id = ?
-        `,
-      ).run(
-        shouldReplaceTitle ? derivedTitle : bookmark.title,
-        buildDescriptionExcerpt(bookmark.url),
-        buildFaviconUrl(bookmark.url),
-        nextNow,
-        bookmarkId,
-      );
+      db.transaction(() => {
+        upsertBookmarkCanonical({
+          db,
+          accountId,
+          snapshot: {
+            ...currentBookmark,
+            title: shouldReplaceTitle ? derivedTitle : currentBookmark.title,
+            descriptionExcerpt: buildDescriptionExcerpt(currentBookmark.url),
+            favicon: buildFaviconUrl(currentBookmark.url),
+            coverUrl: null,
+            processingStatus: 'ready',
+            processingError: null,
+          },
+          writerKind: 'system',
+          actorDeviceId: null,
+          changedFields: ['title', 'descriptionExcerpt', 'favicon', 'coverUrl', 'processingStatus', 'processingError'],
+        });
+      })();
     } catch (error) {
-      db.prepare(
-        `
-          UPDATE bookmarks
-          SET processing_status = 'failed',
-              processing_error = ?,
-              updated_at = ?,
-              version = version + 1
-          WHERE id = ?
-        `,
-      ).run(error instanceof Error ? error.message : 'Remote metadata processing failed.', new Date().toISOString(), bookmarkId);
+      const currentBookmark = loadBookmarkSyncSnapshot(db, bookmarkId);
+
+      if (currentBookmark && !currentBookmark.deletedAt) {
+        db.transaction(() => {
+          upsertBookmarkCanonical({
+            db,
+            accountId,
+            snapshot: {
+              ...currentBookmark,
+              processingStatus: 'failed',
+              processingError: error instanceof Error ? error.message : 'Remote metadata processing failed.',
+            },
+            writerKind: 'system',
+            actorDeviceId: null,
+            changedFields: ['processingStatus', 'processingError'],
+          });
+        })();
+      }
     } finally {
       inFlightJobs.delete(bookmarkId);
     }

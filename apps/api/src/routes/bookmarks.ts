@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import { queueRemoteMetadataExtraction, retryRemoteMetadataExtraction } from '../services/metadataQueue.js';
+import { SyncMutationError, deleteBookmarkCanonical, upsertBookmarkCanonical } from '../services/syncMutations.js';
+import type { SyncBookmarkSnapshot } from '../syncContract.js';
 
 const bookmarkCreateSchema = z.object({
   url: z.string().trim().min(1),
@@ -9,7 +11,15 @@ const bookmarkCreateSchema = z.object({
   description: z.string().nullable().optional(),
   primaryCategoryId: z.string().trim().min(1).nullable().optional(),
   isStarred: z.boolean().optional(),
-  tags: z.array(z.object({ label: z.string().trim().min(1) })).optional(),
+  tags: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).optional(),
+        label: z.string().trim().min(1),
+        color: z.string().nullable().optional(),
+      }),
+    )
+    .optional(),
   collectionIds: z.array(z.string().trim().min(1)).optional(),
 });
 
@@ -20,7 +30,15 @@ const bookmarkUpdateSchema = z.object({
   primaryCategoryId: z.string().trim().min(1).nullable().optional(),
   isStarred: z.boolean().optional(),
   userEditedMask: z.array(z.string().trim().min(1)).optional(),
-  tags: z.array(z.object({ label: z.string().trim().min(1) })).optional(),
+  tags: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).optional(),
+        label: z.string().trim().min(1),
+        color: z.string().nullable().optional(),
+      }),
+    )
+    .optional(),
   collectionIds: z.array(z.string().trim().min(1)).optional(),
 });
 
@@ -280,58 +298,58 @@ export async function registerBookmarkRoutes(app: FastifyInstance): Promise<void
     return mapBookmarkRecord(app, row);
   });
 
-  app.post('/api/bookmarks', { preHandler: app.requireSession }, async (request) => {
+  app.post('/api/bookmarks', { preHandler: app.requireSession }, async (request, reply) => {
     const input = bookmarkCreateSchema.parse(request.body);
     const id = ulid();
     const now = new Date().toISOString();
     const normalizedUrl = normalizeBookmarkUrl(input.url);
     const initialTitle = input.title?.trim() || input.url.trim();
+    const snapshot: SyncBookmarkSnapshot = {
+      entityType: 'bookmark',
+      id,
+      url: input.url.trim(),
+      normalizedUrl,
+      title: initialTitle,
+      description: input.description ?? null,
+      descriptionExcerpt: null,
+      favicon: null,
+      coverUrl: null,
+      primaryCategoryId: input.primaryCategoryId ?? 'system-unsorted',
+      isStarred: Boolean(input.isStarred),
+      processingStatus: 'processing',
+      processingError: null,
+      userEditedMask: [],
+      tags: (input.tags ?? []).map((tag) => ({
+        id: tag.id ?? ulid(),
+        label: tag.label,
+        color: tag.color ?? null,
+      })),
+      collectionIds: input.collectionIds ?? [],
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      version: 0,
+    };
 
-    app.db.transaction(() => {
-      app.db
-        .prepare(
-          `
-            INSERT INTO bookmarks (
-              id,
-              url,
-              normalized_url,
-              title,
-              description,
-              description_excerpt,
-              favicon,
-              cover_url,
-              primary_category_id,
-              is_starred,
-              processing_status,
-              processing_error,
-              user_edited_mask,
-              version,
-              created_at,
-              updated_at,
-              deleted_at
-            ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, 'processing', NULL, '[]', 1, ?, ?, NULL)
-          `,
-        )
-        .run(
-          id,
-          input.url.trim(),
-          normalizedUrl,
-          initialTitle,
-          input.description ?? null,
-          input.primaryCategoryId ?? 'system-unsorted',
-          input.isStarred ? 1 : 0,
-          now,
-          now,
-        );
-
-      if (input.tags) {
-        syncBookmarkTags(app, id, input.tags);
+    try {
+      app.db.transaction(() => {
+        upsertBookmarkCanonical({
+          db: app.db,
+          accountId: request.currentAccount!.id,
+          snapshot,
+          writerKind: 'user',
+          actorDeviceId: null,
+          changedFields: ['url', 'title', 'description', 'primaryCategoryId', 'isStarred', 'tags', 'collectionIds', 'processingStatus'],
+        });
+      })();
+    } catch (error) {
+      if (error instanceof SyncMutationError) {
+        reply.code(400).send({ code: error.reasonCode, message: error.message });
+        return;
       }
 
-      if (input.collectionIds) {
-        syncBookmarkCollections(app, id, input.collectionIds);
-      }
-    })();
+      throw error;
+    }
 
     await queueRemoteMetadataExtraction(id, app.db);
     return mapBookmarkRecord(app, getBookmarkRow(app, id)!);
@@ -347,52 +365,69 @@ export async function registerBookmarkRoutes(app: FastifyInstance): Promise<void
       return;
     }
 
+    const currentRecord = mapBookmarkRecord(app, current);
     const nextUrl = input.url?.trim() ?? current.url;
-    const updates: string[] = [];
-    const values: unknown[] = [];
+    const nextSnapshot: SyncBookmarkSnapshot = {
+      entityType: 'bookmark',
+      id: current.id,
+      url: nextUrl,
+      normalizedUrl: normalizeBookmarkUrl(nextUrl),
+      title: input.title?.trim() ?? current.title,
+      description: input.description !== undefined ? input.description : current.description,
+      descriptionExcerpt: current.description_excerpt,
+      favicon: current.favicon,
+      coverUrl: current.cover_url,
+      primaryCategoryId: input.primaryCategoryId !== undefined ? (input.primaryCategoryId ?? 'system-unsorted') : current.primary_category_id,
+      isStarred: input.isStarred ?? Boolean(current.is_starred),
+      processingStatus: current.processing_status as SyncBookmarkSnapshot['processingStatus'],
+      processingError: current.processing_error,
+      userEditedMask: input.userEditedMask ?? (JSON.parse(current.user_edited_mask || '[]') as string[]),
+      tags:
+        input.tags?.map((tag) => ({
+          id: tag.id ?? ulid(),
+          label: tag.label,
+          color: tag.color ?? null,
+        })) ??
+        currentRecord.tags.map((tag) => ({
+          id: tag.id,
+          label: tag.label,
+          color: tag.color,
+        })),
+      collectionIds: input.collectionIds ?? currentRecord.collection_ids,
+      createdAt: current.created_at,
+      updatedAt: current.updated_at,
+      deletedAt: current.deleted_at,
+      version: current.version,
+    };
+    const changedFields = [
+      input.url !== undefined ? 'url' : null,
+      input.title !== undefined ? 'title' : null,
+      input.description !== undefined ? 'description' : null,
+      input.primaryCategoryId !== undefined ? 'primaryCategoryId' : null,
+      input.isStarred !== undefined ? 'isStarred' : null,
+      input.userEditedMask !== undefined ? 'userEditedMask' : null,
+      input.tags !== undefined ? 'tags' : null,
+      input.collectionIds !== undefined ? 'collectionIds' : null,
+    ].filter((field): field is string => Boolean(field));
 
-    if (input.url !== undefined) {
-      updates.push('url = ?', 'normalized_url = ?');
-      values.push(nextUrl, normalizeBookmarkUrl(nextUrl));
-    }
+    try {
+      app.db.transaction(() => {
+        upsertBookmarkCanonical({
+          db: app.db,
+          accountId: request.currentAccount!.id,
+          snapshot: nextSnapshot,
+          writerKind: 'user',
+          actorDeviceId: null,
+          changedFields,
+        });
+      })();
+    } catch (error) {
+      if (error instanceof SyncMutationError) {
+        reply.code(400).send({ code: error.reasonCode, message: error.message });
+        return;
+      }
 
-    if (input.title !== undefined) {
-      updates.push('title = ?');
-      values.push(input.title.trim());
-    }
-
-    if (input.description !== undefined) {
-      updates.push('description = ?');
-      values.push(input.description);
-    }
-
-    if (input.primaryCategoryId !== undefined) {
-      updates.push('primary_category_id = ?');
-      values.push(input.primaryCategoryId ?? 'system-unsorted');
-    }
-
-    if (input.isStarred !== undefined) {
-      updates.push('is_starred = ?');
-      values.push(input.isStarred ? 1 : 0);
-    }
-
-    if (input.userEditedMask !== undefined) {
-      updates.push('user_edited_mask = ?');
-      values.push(JSON.stringify(input.userEditedMask));
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = ?', 'version = version + 1');
-      values.push(new Date().toISOString(), params.bookmarkId);
-      app.db.prepare(`UPDATE bookmarks SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-    }
-
-    if (input.tags) {
-      syncBookmarkTags(app, params.bookmarkId, input.tags);
-    }
-
-    if (input.collectionIds) {
-      syncBookmarkCollections(app, params.bookmarkId, input.collectionIds);
+      throw error;
     }
 
     return mapBookmarkRecord(app, getBookmarkRow(app, params.bookmarkId)!);
@@ -400,20 +435,22 @@ export async function registerBookmarkRoutes(app: FastifyInstance): Promise<void
 
   app.delete('/api/bookmarks/:bookmarkId', { preHandler: app.requireSession }, async (request, reply) => {
     const params = z.object({ bookmarkId: z.string().min(1) }).parse(request.params);
-    const result = app.db
-      .prepare(
-        `
-          UPDATE bookmarks
-          SET deleted_at = ?, updated_at = ?, version = version + 1
-          WHERE id = ? AND deleted_at IS NULL
-        `,
-      )
-      .run(new Date().toISOString(), new Date().toISOString(), params.bookmarkId);
+    const current = getBookmarkRow(app, params.bookmarkId);
 
-    if (result.changes === 0) {
+    if (!current) {
       reply.code(404).send({ code: 'bookmark_not_found' });
       return;
     }
+
+    app.db.transaction(() => {
+      deleteBookmarkCanonical({
+        db: app.db,
+        accountId: request.currentAccount!.id,
+        bookmarkId: params.bookmarkId,
+        writerKind: 'user',
+        actorDeviceId: null,
+      });
+    })();
 
     return {
       deleted: true,

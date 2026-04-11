@@ -2,6 +2,7 @@ pub mod ai;
 pub mod bookmarks;
 pub mod metadata;
 pub mod search;
+pub mod sync;
 
 pub use ai::{desktop_apply_ai_suggestions, desktop_queue_ai_enrichment, desktop_retry_ai_enrichment};
 pub use bookmarks::{
@@ -12,3 +13,8 @@ pub use bookmarks::{
 };
 pub use metadata::{desktop_queue_metadata_extraction, desktop_retry_metadata_extraction};
 pub use search::{desktop_filter_bookmarks, desktop_search_bookmarks};
+pub use sync::{
+    desktop_ack_sync_push_results, desktop_apply_remote_events, desktop_clear_sync_connection,
+    desktop_get_sync_connection, desktop_get_sync_status, desktop_list_sync_outbox,
+    desktop_save_sync_connection,
+};

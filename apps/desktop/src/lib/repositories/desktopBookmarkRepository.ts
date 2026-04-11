@@ -16,6 +16,7 @@ import type {
 import { invokeDesktop } from '../desktopBridge';
 import { applyAiSuggestions, queueAiEnrichment, retryAiEnrichment } from '../aiClient';
 import { mapBookmarkDto, queueMetadataExtraction, retryMetadataExtraction, type DesktopBookmarkRecordDto } from '../metadataClient';
+import { desktopSyncManager } from '../syncManager';
 
 interface DesktopTagRecordDto {
   id: string;
@@ -88,16 +89,19 @@ function mapCollection(collection: DesktopCollectionRecordDto): CollectionRecord
 export class DesktopBookmarkRepository implements BookmarkRepository {
   async createBookmark(input: CreateBookmarkInput): Promise<BookmarkRecord> {
     const bookmark = await invokeDesktop<DesktopBookmarkRecordDto>('desktop_create_bookmark', { input });
+    desktopSyncManager.noteLocalMutation();
     return mapBookmarkDto(bookmark);
   }
 
   async updateBookmark(bookmarkId: string, patch: UpdateBookmarkPatch): Promise<BookmarkRecord> {
     const bookmark = await invokeDesktop<DesktopBookmarkRecordDto>('desktop_update_bookmark', { bookmarkId, patch });
+    desktopSyncManager.noteLocalMutation();
     return mapBookmarkDto(bookmark);
   }
 
   async deleteBookmark(bookmarkId: string): Promise<void> {
     await invokeDesktop('desktop_delete_bookmark', { bookmarkId });
+    desktopSyncManager.noteLocalMutation();
   }
 
   async getBookmark(bookmarkId: string): Promise<BookmarkRecord | null> {
@@ -147,11 +151,13 @@ export class DesktopBookmarkRepository implements BookmarkRepository {
 
   async saveCategory(input: SaveCategoryInput): Promise<CategoryTreeNode> {
     const category = await invokeDesktop<DesktopCategoryTreeNodeDto>('desktop_save_category', { input });
+    desktopSyncManager.noteLocalMutation();
     return mapCategory(category);
   }
 
   async deleteCategory(categoryId: string): Promise<void> {
     await invokeDesktop('desktop_delete_category', { categoryId });
+    desktopSyncManager.noteLocalMutation();
   }
 
   async listCollections(): Promise<CollectionRecord[]> {
@@ -161,15 +167,18 @@ export class DesktopBookmarkRepository implements BookmarkRepository {
 
   async saveCollection(input: SaveCollectionInput): Promise<CollectionRecord> {
     const collection = await invokeDesktop<DesktopCollectionRecordDto>('desktop_save_collection', { input });
+    desktopSyncManager.noteLocalMutation();
     return mapCollection(collection);
   }
 
   async deleteCollection(collectionId: string): Promise<void> {
     await invokeDesktop('desktop_delete_collection', { collectionId });
+    desktopSyncManager.noteLocalMutation();
   }
 
   async replaceBookmarkTags(bookmarkId: string, tags: TagInput[]): Promise<TagRecord[]> {
     const tagRecords = await invokeDesktop<DesktopTagRecordDto[]>('desktop_replace_bookmark_tags', { bookmarkId, tags });
+    desktopSyncManager.noteLocalMutation();
     return tagRecords.map(mapTag);
   }
 }

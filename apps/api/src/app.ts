@@ -7,6 +7,7 @@ import { registerBookmarkRoutes } from './routes/bookmarks.js';
 import { registerCategoryRoutes } from './routes/categories.js';
 import { registerCollectionRoutes } from './routes/collections.js';
 import { registerSetupRoutes } from './routes/setup.js';
+import { registerSyncRoutes } from './routes/sync.js';
 
 export async function buildApp(db: RemoteDatabase) {
   const app = Fastify({
@@ -21,6 +22,7 @@ export async function buildApp(db: RemoteDatabase) {
   await registerBookmarkRoutes(app);
   await registerCategoryRoutes(app);
   await registerCollectionRoutes(app);
+  await registerSyncRoutes(app);
 
   return app;
 }

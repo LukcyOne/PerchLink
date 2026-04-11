@@ -13,8 +13,9 @@ use crate::{
 };
 
 use super::bookmarks::{
-    get_bookmark, list_categories, update_bookmark, BookmarkRecordDto, TagInputDto, UpdateBookmarkPatchDto,
+    get_bookmark, list_categories, update_bookmark_with_writer, BookmarkRecordDto, TagInputDto, UpdateBookmarkPatchDto,
 };
+use crate::sync::SyncWriterKind;
 
 const AI_STATUS_RUNNING: &str = "running";
 const AI_STATUS_READY: &str = "ready";
@@ -52,8 +53,15 @@ pub fn desktop_apply_ai_suggestions(
     bookmarkId: String,
     input: ApplyAiSuggestionsInputDto,
 ) -> Result<BookmarkRecordDto, String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    apply_ai_suggestions(&connection, &bookmarkId, input).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let bookmark = apply_ai_suggestions(&transaction, &bookmarkId, input).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(bookmark)
 }
 
 async fn process_ai_enrichment(
@@ -214,7 +222,7 @@ fn apply_ai_suggestions(
         return Ok(current_bookmark);
     }
 
-    update_bookmark(connection, bookmark_id, patch)
+    update_bookmark_with_writer(connection, bookmark_id, patch, SyncWriterKind::Ai)
 }
 
 fn set_ai_suggestion_running(

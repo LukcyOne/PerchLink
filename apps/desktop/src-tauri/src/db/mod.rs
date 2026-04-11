@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 
-const MIGRATIONS: [(&str, &str); 2] = [
+const MIGRATIONS: [(&str, &str); 3] = [
     (
         "0001_phase2_core.sql",
         include_str!("../../migrations/0001_phase2_core.sql"),
@@ -16,6 +16,10 @@ const MIGRATIONS: [(&str, &str); 2] = [
     (
         "0002_phase3_ai_enrichment.sql",
         include_str!("../../migrations/0002_phase3_ai_enrichment.sql"),
+    ),
+    (
+        "0003_phase5_sync.sql",
+        include_str!("../../migrations/0003_phase5_sync.sql"),
     ),
 ];
 

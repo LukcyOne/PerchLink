@@ -6,6 +6,10 @@ use tauri::State;
 use ulid::Ulid;
 
 use crate::db::{DatabaseState, DbError};
+use crate::sync::{
+    enqueue_bookmark_sync_change, enqueue_category_sync_change, enqueue_collection_sync_change,
+    sync_operation_delete, sync_operation_upsert, SyncWriterKind,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,8 +206,15 @@ pub fn desktop_create_bookmark(
     state: State<'_, DatabaseState>,
     input: CreateBookmarkInputDto,
 ) -> Result<BookmarkRecordDto, String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    create_bookmark(&connection, input).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let bookmark = create_bookmark(&transaction, input).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(bookmark)
 }
 
 #[tauri::command]
@@ -230,8 +241,15 @@ pub fn desktop_update_bookmark(
     bookmarkId: String,
     patch: UpdateBookmarkPatchDto,
 ) -> Result<BookmarkRecordDto, String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    update_bookmark(&connection, &bookmarkId, patch).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let bookmark = update_bookmark(&transaction, &bookmarkId, patch).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(bookmark)
 }
 
 #[tauri::command]
@@ -239,8 +257,15 @@ pub fn desktop_delete_bookmark(
     state: State<'_, DatabaseState>,
     bookmarkId: String,
 ) -> Result<(), String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    delete_bookmark(&connection, &bookmarkId).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    delete_bookmark(&transaction, &bookmarkId).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -254,8 +279,15 @@ pub fn desktop_save_category(
     state: State<'_, DatabaseState>,
     input: SaveCategoryInputDto,
 ) -> Result<CategoryTreeNodeDto, String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    save_category(&connection, input).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let category = save_category(&transaction, input).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(category)
 }
 
 #[tauri::command]
@@ -263,8 +295,15 @@ pub fn desktop_delete_category(
     state: State<'_, DatabaseState>,
     categoryId: String,
 ) -> Result<(), String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    delete_category(&connection, &categoryId).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    delete_category(&transaction, &categoryId).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -280,8 +319,15 @@ pub fn desktop_save_collection(
     state: State<'_, DatabaseState>,
     input: SaveCollectionInputDto,
 ) -> Result<CollectionRecordDto, String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    save_collection(&connection, input).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let collection = save_collection(&transaction, input).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(collection)
 }
 
 #[tauri::command]
@@ -289,8 +335,15 @@ pub fn desktop_delete_collection(
     state: State<'_, DatabaseState>,
     collectionId: String,
 ) -> Result<(), String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    delete_collection(&connection, &collectionId).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    delete_collection(&transaction, &collectionId).map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -299,8 +352,23 @@ pub fn desktop_replace_bookmark_tags(
     bookmarkId: String,
     tags: Vec<TagInputDto>,
 ) -> Result<Vec<TagRecordDto>, String> {
-    let connection = state.open_connection().map_err(to_command_error)?;
-    replace_bookmark_tags(&connection, &bookmarkId, &tags).map_err(to_command_error)
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let tag_records = replace_bookmark_tags(&transaction, &bookmarkId, &tags).map_err(to_command_error)?;
+    enqueue_bookmark_sync_change(
+        &transaction,
+        &bookmarkId,
+        sync_operation_upsert(),
+        SyncWriterKind::User,
+        &["tags"],
+    )
+    .map_err(to_command_error)?;
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(tag_records)
 }
 
 fn create_bookmark(connection: &Connection, input: CreateBookmarkInputDto) -> Result<BookmarkRecordDto, DbError> {
@@ -380,6 +448,25 @@ fn create_bookmark(connection: &Connection, input: CreateBookmarkInputDto) -> Re
     replace_collection_memberships(connection, &bookmark_id, &input.collection_ids.unwrap_or_default())?;
     replace_bookmark_tags(connection, &bookmark_id, &input.tags.unwrap_or_default())?;
     refresh_bookmark_search(connection, &bookmark_id)?;
+    enqueue_bookmark_sync_change(
+        connection,
+        &bookmark_id,
+        sync_operation_upsert(),
+        SyncWriterKind::User,
+        &[
+            "url",
+            "title",
+            "description",
+            "favicon",
+            "coverUrl",
+            "primaryCategoryId",
+            "isStarred",
+            "processingStatus",
+            "processingError",
+            "tags",
+            "collectionIds",
+        ],
+    )?;
 
     get_bookmark(connection, &bookmark_id)?.ok_or(DbError::BookmarkNotFound(bookmark_id))
 }
@@ -534,8 +621,30 @@ pub(crate) fn update_bookmark(
     bookmark_id: &str,
     patch: UpdateBookmarkPatchDto,
 ) -> Result<BookmarkRecordDto, DbError> {
+    update_bookmark_with_writer(connection, bookmark_id, patch, SyncWriterKind::User)
+}
+
+pub(crate) fn update_bookmark_with_writer(
+    connection: &Connection,
+    bookmark_id: &str,
+    patch: UpdateBookmarkPatchDto,
+    writer_kind: SyncWriterKind,
+) -> Result<BookmarkRecordDto, DbError> {
     let current = get_bookmark(connection, bookmark_id)?
         .ok_or_else(|| DbError::BookmarkNotFound(bookmark_id.to_string()))?;
+    let touched_url = patch.url.is_some();
+    let touched_title = patch.title.is_some();
+    let touched_description = patch.description.is_some();
+    let touched_favicon = patch.favicon.is_some();
+    let touched_cover_url = patch.cover_url.is_some();
+    let touched_primary_category = patch.primary_category_id.is_some();
+    let touched_starred = patch.is_starred.is_some();
+    let touched_processing_status = patch.processing_status.is_some();
+    let touched_processing_error = patch.processing_error.is_some();
+    let touched_user_edited_mask = patch.user_edited_mask.is_some();
+    let touched_tags = patch.tags.is_some();
+    let touched_collection_ids = patch.collection_ids.is_some();
+    let touched_deleted_at = patch.deleted_at.is_some();
 
     let url = patch.url.unwrap_or_else(|| current.url.clone());
     let normalized_url = normalize_bookmark_url(&url);
@@ -614,6 +723,57 @@ pub(crate) fn update_bookmark(
     }
 
     refresh_bookmark_search(connection, bookmark_id)?;
+    let mut changed_fields = Vec::new();
+    if touched_url {
+        changed_fields.push("url");
+    }
+    if touched_title {
+        changed_fields.push("title");
+    }
+    if touched_description {
+        changed_fields.push("description");
+    }
+    if touched_favicon {
+        changed_fields.push("favicon");
+    }
+    if touched_cover_url {
+        changed_fields.push("coverUrl");
+    }
+    if touched_primary_category {
+        changed_fields.push("primaryCategoryId");
+    }
+    if touched_starred {
+        changed_fields.push("isStarred");
+    }
+    if touched_processing_status {
+        changed_fields.push("processingStatus");
+    }
+    if touched_processing_error {
+        changed_fields.push("processingError");
+    }
+    if touched_user_edited_mask {
+        changed_fields.push("userEditedMask");
+    }
+    if touched_tags {
+        changed_fields.push("tags");
+    }
+    if touched_collection_ids {
+        changed_fields.push("collectionIds");
+    }
+    if touched_deleted_at {
+        changed_fields.push("deletedAt");
+    }
+    enqueue_bookmark_sync_change(
+        connection,
+        bookmark_id,
+        if deleted_at.is_some() {
+            sync_operation_delete()
+        } else {
+            sync_operation_upsert()
+        },
+        writer_kind,
+        &changed_fields,
+    )?;
 
     get_bookmark(connection, bookmark_id)?.ok_or_else(|| DbError::BookmarkNotFound(bookmark_id.to_string()))
 }
@@ -634,6 +794,13 @@ fn delete_bookmark(connection: &Connection, bookmark_id: &str) -> Result<(), DbE
     }
 
     refresh_bookmark_search(connection, bookmark_id)?;
+    enqueue_bookmark_sync_change(
+        connection,
+        bookmark_id,
+        sync_operation_delete(),
+        SyncWriterKind::User,
+        &["deletedAt"],
+    )?;
     Ok(())
 }
 
@@ -654,6 +821,7 @@ pub(crate) fn list_categories(connection: &Connection) -> Result<Vec<CategoryTre
         LEFT JOIN bookmarks b
           ON b.primary_category_id = c.id
          AND b.deleted_at IS NULL
+        WHERE c.deleted_at IS NULL
         GROUP BY c.id, c.name, c.slug, c.parent_id, c.sort_order, c.is_system, c.created_at, c.updated_at
         ORDER BY c.sort_order ASC, c.name COLLATE NOCASE ASC
         ",
@@ -708,6 +876,13 @@ fn save_category(connection: &Connection, input: SaveCategoryInputDto) -> Result
             params![category_id, name, slug, parent_id, sort_order],
         )?;
     }
+    enqueue_category_sync_change(
+        connection,
+        &category_id,
+        sync_operation_upsert(),
+        SyncWriterKind::User,
+        &["name", "slug", "parentId", "sortOrder"],
+    )?;
 
     let categories = list_categories(connection)?;
     find_category_node(&categories, &category_id).ok_or(DbError::BookmarkNotFound(category_id))
@@ -719,7 +894,12 @@ fn delete_category(connection: &Connection, category_id: &str) -> Result<(), DbE
     }
 
     let affected = connection.execute(
-        "DELETE FROM categories WHERE id = ?1 AND is_system = 0",
+        "
+        UPDATE categories
+        SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?1 AND is_system = 0 AND deleted_at IS NULL
+        ",
         [category_id],
     )?;
 
@@ -734,6 +914,13 @@ fn delete_category(connection: &Connection, category_id: &str) -> Result<(), DbE
     connection.execute(
         "UPDATE categories SET parent_id = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE parent_id = ?1",
         [category_id],
+    )?;
+    enqueue_category_sync_change(
+        connection,
+        category_id,
+        sync_operation_delete(),
+        SyncWriterKind::User,
+        &["deletedAt"],
     )?;
 
     Ok(())
@@ -753,6 +940,7 @@ fn list_collections(connection: &Connection) -> Result<Vec<CollectionRecordDto>,
         FROM collections c
         LEFT JOIN collection_bookmarks cb ON cb.collection_id = c.id
         LEFT JOIN bookmarks b ON b.id = cb.bookmark_id AND b.deleted_at IS NULL
+        WHERE c.deleted_at IS NULL
         GROUP BY c.id, c.name, c.description, c.sort_order, c.created_at, c.updated_at
         ORDER BY c.sort_order ASC, c.name COLLATE NOCASE ASC
         ",
@@ -801,6 +989,13 @@ fn save_collection(connection: &Connection, input: SaveCollectionInputDto) -> Re
             params![collection_id, name, description, sort_order],
         )?;
     }
+    enqueue_collection_sync_change(
+        connection,
+        &collection_id,
+        sync_operation_upsert(),
+        SyncWriterKind::User,
+        &["name", "description", "sortOrder"],
+    )?;
 
     let mut statement = connection.prepare(
         "
@@ -836,11 +1031,28 @@ fn save_collection(connection: &Connection, input: SaveCollectionInputDto) -> Re
 }
 
 fn delete_collection(connection: &Connection, collection_id: &str) -> Result<(), DbError> {
-    let affected = connection.execute("DELETE FROM collections WHERE id = ?1", [collection_id])?;
+    let affected = connection.execute(
+        "
+        UPDATE collections
+        SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?1 AND deleted_at IS NULL
+        ",
+        [collection_id],
+    )?;
 
     if affected == 0 {
         return Err(DbError::BookmarkNotFound(collection_id.to_string()));
     }
+
+    connection.execute("DELETE FROM collection_bookmarks WHERE collection_id = ?1", [collection_id])?;
+    enqueue_collection_sync_change(
+        connection,
+        collection_id,
+        sync_operation_delete(),
+        SyncWriterKind::User,
+        &["deletedAt"],
+    )?;
 
     Ok(())
 }
@@ -911,7 +1123,7 @@ pub(crate) fn replace_bookmark_tags(
     Ok(saved_tags)
 }
 
-fn replace_collection_memberships(
+pub(crate) fn replace_collection_memberships(
     connection: &Connection,
     bookmark_id: &str,
     collection_ids: &[String],

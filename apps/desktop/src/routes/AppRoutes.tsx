@@ -2,14 +2,17 @@ import { useEffect } from 'react';
 import { Routes, Route, MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { getShellNavigationItem, shellNavigation, type TagRecord, type NavItemId } from '@perchlink/core';
 import { i18nInstance, useLocale } from '@perchlink/i18n';
-import { useBookmarksStore } from '@perchlink/store';
-import { AppShell, BookmarkViewToggle, SearchToolbar } from '@perchlink/ui';
+import { useBookmarksStore, useSyncStore } from '@perchlink/store';
+import { AppShell, BookmarkViewToggle, SearchToolbar, SyncStatusPill } from '@perchlink/ui';
 import { desktopBookmarkRepository } from '../lib/repositories/desktopBookmarkRepository';
+import { desktopSyncManager } from '../lib/syncManager';
 import { AllBookmarksPage } from '../pages/AllBookmarksPage';
 import { CategoriesPage } from '../pages/CategoriesPage';
 import { CollectionsPage } from '../pages/CollectionsPage';
 import { RecentBookmarksPage } from '../pages/RecentBookmarksPage';
+import { SettingsPage } from '../pages/SettingsPage';
 import { StarredBookmarksPage } from '../pages/StarredBookmarksPage';
+import { SyncCenterPage } from '../pages/SyncCenterPage';
 
 function resolveActiveNavId(pathname: string): NavItemId {
   switch (pathname) {
@@ -22,6 +25,7 @@ function resolveActiveNavId(pathname: string): NavItemId {
     case '/collections':
       return 'collections';
     case '/settings':
+    case '/sync-center':
       return 'settings';
     default:
       return 'all-bookmarks';
@@ -57,6 +61,7 @@ function DesktopShellRoutes() {
     setActiveView,
     setSearchTerm,
   } = useBookmarksStore();
+  const { status, hydrate: hydrateSync } = useSyncStore();
   const activeNavId = resolveActiveNavId(location.pathname);
   const activeNavigationItem = getShellNavigationItem(activeNavId);
   const availableTags = collectAvailableTags(bookmarks);
@@ -64,6 +69,29 @@ function DesktopShellRoutes() {
   useEffect(() => {
     configureRepository(desktopBookmarkRepository);
   }, [configureRepository]);
+
+  useEffect(() => {
+    void desktopSyncManager.start();
+  }, []);
+
+  useEffect(() => {
+    void hydrateSync();
+  }, [hydrateSync]);
+
+  const syncTone =
+    status?.connectionState === 'up-to-date'
+      ? 'positive'
+      : status?.connectionState === 'needs-attention'
+        ? 'warning'
+        : 'muted';
+  const syncLabel =
+    status?.connectionState === 'up-to-date'
+      ? 'Up to Date'
+      : status?.connectionState === 'syncing'
+        ? 'Syncing...'
+        : status?.connectionState === 'needs-attention'
+          ? 'Sync Needs Attention'
+          : 'Local Mode';
 
   return (
     <AppShell
@@ -79,25 +107,28 @@ function DesktopShellRoutes() {
       onPrimaryAction={openQuickAdd}
       resolveNavLabel={(labelKey) => i18nInstance.t(labelKey, { lng: locale })}
       utilities={
-        activeNavId === 'settings' ? undefined : (
-          <SearchToolbar
-            search={searchTerm}
-            categories={categories}
-            collections={collections}
-            availableTags={availableTags}
-            activeCategoryId={activeFilters.categoryId}
-            activeCollectionId={activeFilters.collectionId}
-            activeTagIds={activeFilters.tagIds}
-            starredOnly={activeFilters.starredOnly}
-            onSearchChange={setSearchTerm}
-            onCategoryChange={(value) => setActiveFilters({ categoryId: value })}
-            onCollectionChange={(value) => setActiveFilters({ collectionId: value })}
-            onTagIdsChange={(value) => setActiveFilters({ tagIds: value })}
-            onStarredChange={(value) => setActiveFilters({ starredOnly: value })}
-          >
-            <BookmarkViewToggle value={activeView} onChange={setActiveView} />
-          </SearchToolbar>
-        )
+        <>
+          <SyncStatusPill label={syncLabel} tone={syncTone} onClick={() => navigate('/sync-center')} />
+          {activeNavId === 'settings' ? null : (
+            <SearchToolbar
+              search={searchTerm}
+              categories={categories}
+              collections={collections}
+              availableTags={availableTags}
+              activeCategoryId={activeFilters.categoryId}
+              activeCollectionId={activeFilters.collectionId}
+              activeTagIds={activeFilters.tagIds}
+              starredOnly={activeFilters.starredOnly}
+              onSearchChange={setSearchTerm}
+              onCategoryChange={(value) => setActiveFilters({ categoryId: value })}
+              onCollectionChange={(value) => setActiveFilters({ collectionId: value })}
+              onTagIdsChange={(value) => setActiveFilters({ tagIds: value })}
+              onStarredChange={(value) => setActiveFilters({ starredOnly: value })}
+            >
+              <BookmarkViewToggle value={activeView} onChange={setActiveView} />
+            </SearchToolbar>
+          )}
+        </>
       }
     >
       <Routes>
@@ -106,17 +137,8 @@ function DesktopShellRoutes() {
         <Route path="/recent" element={<RecentBookmarksPage />} />
         <Route path="/categories" element={<CategoriesPage />} />
         <Route path="/collections" element={<CollectionsPage />} />
-        <Route
-          path="/settings"
-          element={
-            <section>
-              <h2 style={{ marginTop: 0 }}>Settings</h2>
-              <p style={{ color: 'var(--color-text-muted)' }}>
-                Phase 2 keeps settings lightweight while bookmark management lives in the main workspace.
-              </p>
-            </section>
-          }
-        />
+        <Route path="/settings" element={<SettingsPage onOpenSyncCenter={() => navigate('/sync-center')} />} />
+        <Route path="/sync-center" element={<SyncCenterPage />} />
       </Routes>
     </AppShell>
   );

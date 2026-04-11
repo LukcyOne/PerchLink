@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { ulid } from 'ulid';
 import { z } from 'zod';
+import { loadCategorySyncSnapshot } from '../services/syncEvents.js';
+import { SyncMutationError, deleteCategoryCanonical, upsertCategoryCanonical } from '../services/syncMutations.js';
+import type { SyncCategorySnapshot } from '../syncContract.js';
 
 const categoryBodySchema = z.object({
   name: z.string().trim().min(1),
@@ -52,6 +55,7 @@ function loadCategoryTree(app: FastifyInstance) {
         LEFT JOIN bookmarks
           ON bookmarks.primary_category_id = categories.id
          AND bookmarks.deleted_at IS NULL
+        WHERE categories.deleted_at IS NULL
         GROUP BY categories.id
         ORDER BY categories.sort_order ASC, categories.created_at ASC
       `,
@@ -93,36 +97,82 @@ function loadCategoryTree(app: FastifyInstance) {
 export async function registerCategoryRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/categories', { preHandler: app.requireSession }, async () => loadCategoryTree(app));
 
-  app.post('/api/categories', { preHandler: app.requireSession }, async (request) => {
+  app.post('/api/categories', { preHandler: app.requireSession }, async (request, reply) => {
     const input = categoryBodySchema.parse(request.body);
     const now = new Date().toISOString();
     const id = ulid();
+    const snapshot: SyncCategorySnapshot = {
+      entityType: 'category',
+      id,
+      name: input.name,
+      slug: input.slug ?? null,
+      parentId: input.parentId ?? null,
+      sortOrder: input.sortOrder ?? 0,
+      isSystem: false,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      version: 0,
+    };
 
-    app.db
-      .prepare(
-        `
-          INSERT INTO categories (id, name, slug, parent_id, sort_order, is_system, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-        `,
-      )
-      .run(id, input.name, input.slug ?? null, input.parentId ?? null, input.sortOrder ?? 0, now, now);
+    try {
+      app.db.transaction(() => {
+        upsertCategoryCanonical({
+          db: app.db,
+          accountId: request.currentAccount!.id,
+          snapshot,
+          writerKind: 'user',
+          actorDeviceId: null,
+          changedFields: ['name', 'slug', 'parentId', 'sortOrder'],
+        });
+      })();
+    } catch (error) {
+      if (error instanceof SyncMutationError) {
+        reply.code(400).send({ code: error.reasonCode, message: error.message });
+        return;
+      }
+
+      throw error;
+    }
 
     return app.db.prepare('SELECT id, name, slug, parent_id, sort_order, is_system, created_at, updated_at FROM categories WHERE id = ?').get(id);
   });
 
-  app.patch('/api/categories/:categoryId', { preHandler: app.requireSession }, async (request) => {
+  app.patch('/api/categories/:categoryId', { preHandler: app.requireSession }, async (request, reply) => {
     const params = z.object({ categoryId: z.string().min(1) }).parse(request.params);
     const input = categoryBodySchema.parse(request.body);
+    const current = loadCategorySyncSnapshot(app.db, params.categoryId);
 
-    app.db
-      .prepare(
-        `
-          UPDATE categories
-          SET name = ?, slug = ?, parent_id = ?, sort_order = ?, updated_at = ?
-          WHERE id = ?
-        `,
-      )
-      .run(input.name, input.slug ?? null, input.parentId ?? null, input.sortOrder ?? 0, new Date().toISOString(), params.categoryId);
+    if (!current || current.deletedAt) {
+      reply.code(404).send({ code: 'category_not_found' });
+      return;
+    }
+
+    try {
+      app.db.transaction(() => {
+        upsertCategoryCanonical({
+          db: app.db,
+          accountId: request.currentAccount!.id,
+          snapshot: {
+            ...current,
+            name: input.name,
+            slug: input.slug ?? null,
+            parentId: input.parentId ?? null,
+            sortOrder: input.sortOrder ?? 0,
+          },
+          writerKind: 'user',
+          actorDeviceId: null,
+          changedFields: ['name', 'slug', 'parentId', 'sortOrder'],
+        });
+      })();
+    } catch (error) {
+      if (error instanceof SyncMutationError) {
+        reply.code(400).send({ code: error.reasonCode, message: error.message });
+        return;
+      }
+
+      throw error;
+    }
 
     return app.db.prepare('SELECT id, name, slug, parent_id, sort_order, is_system, created_at, updated_at FROM categories WHERE id = ?').get(params.categoryId);
   });
@@ -144,8 +194,13 @@ export async function registerCategoryRoutes(app: FastifyInstance): Promise<void
     }
 
     app.db.transaction(() => {
-      app.db.prepare(`UPDATE bookmarks SET primary_category_id = 'system-unsorted', updated_at = ?, version = version + 1 WHERE primary_category_id = ?`).run(new Date().toISOString(), params.categoryId);
-      app.db.prepare('DELETE FROM categories WHERE id = ?').run(params.categoryId);
+      deleteCategoryCanonical({
+        db: app.db,
+        accountId: request.currentAccount!.id,
+        categoryId: params.categoryId,
+        writerKind: 'user',
+        actorDeviceId: null,
+      });
     })();
 
     return {
