@@ -22,3 +22,4 @@ tauri-plugin-fs = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset"] }
 scraper = "0.24"
 url = "2.5"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }

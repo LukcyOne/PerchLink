@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 
-const MIGRATIONS: [(&str, &str); 3] = [
+const MIGRATIONS: [(&str, &str); 4] = [
     (
         "0001_phase2_core.sql",
         include_str!("../../migrations/0001_phase2_core.sql"),
@@ -20,6 +20,10 @@ const MIGRATIONS: [(&str, &str); 3] = [
     (
         "0003_phase5_sync.sql",
         include_str!("../../migrations/0003_phase5_sync.sql"),
+    ),
+    (
+        "0004_phase6_ai_settings.sql",
+        include_str!("../../migrations/0004_phase6_ai_settings.sql"),
     ),
 ];
 
@@ -39,6 +43,12 @@ pub enum DbError {
     BookmarkNotFound(String),
     #[error("protected category {0} cannot be deleted")]
     ProtectedCategory(String),
+    #[error("AI provider {0} was not found")]
+    AiProviderProfileNotFound(String),
+    #[error("invalid AI settings: {0}")]
+    InvalidAiSettings(String),
+    #[error("secret storage error: {0}")]
+    SecretStorage(String),
 }
 
 pub struct DatabaseState {

@@ -12,6 +12,13 @@ import type {
   TagRecord,
   UpdateBookmarkPatch,
 } from './bookmarks';
+import type {
+  AiExecutionMode,
+  AiExecutionPreferences,
+  AiProviderProfileRecord,
+  SaveAiExecutionPreferencesInput,
+  SaveAiProviderProfileInput,
+} from './aiChannels';
 import type { BookmarkSearchQuery } from './bookmarkSearch';
 
 export interface BookmarkRepository {
@@ -34,4 +41,15 @@ export interface BookmarkRepository {
   saveCollection(input: SaveCollectionInput): Promise<CollectionRecord>;
   deleteCollection(collectionId: string): Promise<void>;
   replaceBookmarkTags(bookmarkId: string, tags: TagInput[]): Promise<TagRecord[]>;
+}
+
+export interface AiSettingsRepository {
+  listAiProviderProfiles(): Promise<AiProviderProfileRecord[]>;
+  saveAiProviderProfile(input: SaveAiProviderProfileInput): Promise<AiProviderProfileRecord>;
+  deleteAiProviderProfile(profileId: string): Promise<void>;
+  setAiProviderSecret(profileId: string, secret: string): Promise<void>;
+  clearAiProviderSecret(profileId: string): Promise<void>;
+  getAiExecutionPreferences(): Promise<AiExecutionPreferences>;
+  saveAiExecutionPreferences(input: SaveAiExecutionPreferencesInput): Promise<AiExecutionPreferences>;
+  hasReadyProfileForMode?(mode: AiExecutionMode): Promise<boolean>;
 }

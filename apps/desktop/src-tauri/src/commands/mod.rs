@@ -1,10 +1,17 @@
 pub mod ai;
+pub mod ai_settings;
 pub mod bookmarks;
 pub mod metadata;
 pub mod search;
 pub mod sync;
 
 pub use ai::{desktop_apply_ai_suggestions, desktop_queue_ai_enrichment, desktop_retry_ai_enrichment};
+pub use ai_settings::{
+    desktop_clear_ai_provider_secret, desktop_delete_ai_provider_profile,
+    desktop_get_ai_execution_preferences, desktop_list_ai_provider_profiles,
+    desktop_save_ai_execution_preferences, desktop_save_ai_provider_profile,
+    desktop_set_ai_provider_secret,
+};
 pub use bookmarks::{
     desktop_create_bookmark, desktop_delete_bookmark, desktop_delete_category,
     desktop_delete_collection, desktop_get_bookmark, desktop_list_bookmarks, desktop_list_categories,

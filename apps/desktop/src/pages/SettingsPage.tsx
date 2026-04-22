@@ -1,5 +1,8 @@
 import { useTranslation } from '@perchlink/i18n';
-import { useSyncStore } from '@perchlink/store';
+import { useEffect } from 'react';
+import { useAiSettingsStore, useSyncStore } from '@perchlink/store';
+import { AiExecutionModePanel, AiProviderDetailPanel, AiProviderList } from '@perchlink/ui';
+import { desktopAiSettingsRepository } from '../lib/repositories/desktopAiSettingsRepository';
 
 interface SettingsPageProps {
   onOpenSyncCenter: () => void;
@@ -8,15 +11,77 @@ interface SettingsPageProps {
 export function SettingsPage({ onOpenSyncCenter }: SettingsPageProps) {
   const { t } = useTranslation();
   const { status } = useSyncStore();
+  const {
+    profiles,
+    selectedProfileId,
+    draft,
+    executionPreferences,
+    isLoading,
+    isSaving,
+    error,
+    configureRepository,
+    hydrate,
+    selectProfile,
+    createProfileFromPreset,
+    updateDraft,
+    saveDraft,
+    deleteSelectedProfile,
+    clearSelectedSecret,
+    saveExecutionMode,
+  } = useAiSettingsStore();
+
+  useEffect(() => {
+    configureRepository(desktopAiSettingsRepository);
+  }, [configureRepository]);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   return (
     <section style={{ display: 'grid', gap: 'var(--space-lg)' }}>
       <header>
-        <h2 style={{ marginTop: 0 }}>Settings</h2>
+        <h2 style={{ marginTop: 0 }}>{t('settings.title')}</h2>
         <p style={{ color: 'var(--color-text-muted)' }}>
-          Keep desktop preferences light here, and route sync health into a dedicated center.
+          {t('settings.body')}
         </p>
       </header>
+
+      <div
+        style={{
+          display: 'grid',
+          gap: 'var(--space-lg)',
+          gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)',
+          alignItems: 'start',
+        }}
+      >
+        <AiProviderList
+          profiles={profiles}
+          selectedProfileId={selectedProfileId}
+          isLoading={isLoading}
+          onSelect={selectProfile}
+          onCreateFromPreset={createProfileFromPreset}
+        />
+
+        <div style={{ display: 'grid', gap: 'var(--space-lg)' }}>
+          <AiExecutionModePanel
+            mode={executionPreferences.mode}
+            isBusy={isSaving}
+            onChange={(mode) => void saveExecutionMode(mode)}
+          />
+
+          <AiProviderDetailPanel
+            profile={selectedProfileId ? profiles.find((profile) => profile.id === selectedProfileId) ?? null : null}
+            draft={draft}
+            isSaving={isSaving}
+            error={error}
+            onChange={updateDraft}
+            onSave={() => void saveDraft()}
+            onDelete={() => void deleteSelectedProfile()}
+            onClearSecret={() => void clearSelectedSecret()}
+          />
+        </div>
+      </div>
 
       <article
         style={{
@@ -27,11 +92,11 @@ export function SettingsPage({ onOpenSyncCenter }: SettingsPageProps) {
           display: 'grid',
           gap: 'var(--space-md)',
         }}
-        >
-          <div>
+      >
+        <div>
           <strong>{t('sync.settingsSyncTitle')}</strong>
           <p style={{ color: 'var(--color-text-muted)', marginBottom: 0 }}>
-            {t('sync.settingsSyncBody')} Current status: {status?.connectionState ?? 'local-only'}
+            {t('sync.settingsSyncBody')} {t('settings.syncStatusPrefix')} {status?.connectionState ?? 'local-only'}
           </p>
         </div>
         <button
