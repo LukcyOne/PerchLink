@@ -42,6 +42,10 @@ interface DeviceRow {
   account_name: string;
 }
 
+interface DeviceAuthLookupRow {
+  revoked_at: string | null;
+}
+
 function mapAccount(row: AccountLookupRow): RemoteAccountSummary {
   return {
     id: row.account_id,
@@ -88,6 +92,35 @@ export async function registerAuthSession(app: FastifyInstance): Promise<void> {
 
   app.decorate('requireDevice', async function requireDevice(request, reply) {
     if (!request.currentAccount || !request.currentDevice) {
+      const bearerToken = readBearerToken(request);
+
+      if (bearerToken?.startsWith('ptdev_')) {
+        const tokenHash = hashDeviceToken(bearerToken);
+        const device = app.db
+          .prepare(
+            `
+              SELECT revoked_at
+              FROM devices
+              WHERE token_hash = ?
+            `,
+          )
+          .get(tokenHash) as DeviceAuthLookupRow | undefined;
+
+        if (device?.revoked_at) {
+          reply.code(403).send({
+            code: 'device_revoked',
+            message: 'This sync device has been revoked. The desktop should return to local mode.',
+          });
+          return;
+        }
+
+        reply.code(401).send({
+          code: 'auth_invalid',
+          message: 'Sync authentication is no longer valid. Please sign in again.',
+        });
+        return;
+      }
+
       reply.code(401).send({
         code: 'device_auth_required',
         message: 'This action requires a registered sync device.',

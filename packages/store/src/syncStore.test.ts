@@ -26,6 +26,9 @@ vi.mock('../../../apps/desktop/src/lib/syncClient', () => {
       lastError: null,
       currentDevice: (storedConnection as { currentDevice?: unknown } | null)?.currentDevice ?? null,
     })),
+    listDesktopSyncRounds: vi.fn(async () => []),
+    listDesktopSyncConflicts: vi.fn(async () => []),
+    markDesktopSyncConflictRead: vi.fn(async () => {}),
     listSyncDevices: vi.fn(async () => []),
     signInForSync: vi.fn(async () => ({
       sessionToken: 'session-1',
@@ -60,6 +63,8 @@ describe('useSyncStore', () => {
       connection: null,
       status: null,
       devices: [],
+      rounds: [],
+      conflicts: [],
       remoteAddressDraft: 'http://127.0.0.1:8787',
       accountDraft: '',
       passwordDraft: '',

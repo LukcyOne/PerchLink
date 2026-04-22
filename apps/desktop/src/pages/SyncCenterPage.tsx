@@ -1,14 +1,26 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useTranslation } from '@perchlink/i18n';
 import { useSyncStore } from '@perchlink/store';
-import { DeviceRegistrationDialog, SyncDevicesPanel, SyncOverviewPanel } from '@perchlink/ui';
+import {
+  DeviceRegistrationDialog,
+  SyncConflictsPanel,
+  SyncDevicesPanel,
+  SyncHistoryPanel,
+  SyncOverviewPanel,
+} from '@perchlink/ui';
+
+type SyncCenterTab = 'overview' | 'history' | 'conflicts' | 'devices';
 
 export function SyncCenterPage() {
   const { t } = useTranslation();
+  const location = useLocation();
   const {
     connection,
     status,
     devices,
+    rounds,
+    conflicts,
     remoteAddressDraft,
     accountDraft,
     passwordDraft,
@@ -25,11 +37,50 @@ export function SyncCenterPage() {
     syncNow,
     refreshDevices,
     revokeDevice,
+    markConflictRead,
   } = useSyncStore();
+  const [activeTab, setActiveTab] = useState<SyncCenterTab>('overview');
+  const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const requestedTab = params.get('tab');
+    const requestedConflictId = params.get('conflictId');
+
+    if (requestedTab === 'overview' || requestedTab === 'history' || requestedTab === 'conflicts' || requestedTab === 'devices') {
+      setActiveTab(requestedTab);
+    }
+
+    if (requestedConflictId) {
+      setSelectedConflictId(requestedConflictId);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!selectedConflictId && conflicts.length > 0) {
+      setSelectedConflictId(conflicts[0]?.id ?? null);
+    }
+  }, [conflicts, selectedConflictId]);
+
+  const tabs: Array<{ id: SyncCenterTab; label: string }> = [
+    { id: 'overview', label: t('sync.overviewTitle') },
+    { id: 'history', label: t('sync.historyTitle') },
+    { id: 'conflicts', label: t('sync.conflictsTitle') },
+    { id: 'devices', label: t('sync.devicesTitle') },
+  ];
+
+  async function handleSelectConflict(conflictId: string) {
+    setActiveTab('conflicts');
+    setSelectedConflictId(conflictId);
+    const conflict = conflicts.find((entry) => entry.id === conflictId);
+    if (conflict?.unread) {
+      await markConflictRead(conflictId);
+    }
+  }
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-xl)' }}>
@@ -39,6 +90,33 @@ export function SyncCenterPage() {
           {t('sync.centerBody')}
         </p>
       </header>
+
+      <nav
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              border: `1px solid ${activeTab === tab.id ? 'var(--color-accent)' : 'var(--color-border-subtle)'}`,
+              borderRadius: 999,
+              background: activeTab === tab.id ? 'rgba(47, 107, 98, 0.1)' : 'transparent',
+              color: activeTab === tab.id ? 'var(--color-accent)' : 'var(--color-text-primary)',
+              padding: '10px 14px',
+              cursor: 'pointer',
+              fontWeight: 'var(--weight-semibold)',
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
 
       {!connection?.accountId ? (
         <section
@@ -84,97 +162,85 @@ export function SyncCenterPage() {
         </section>
       ) : null}
 
-      <SyncOverviewPanel
-        remoteAddress={status?.remoteAddress ?? connection?.remoteAddress ?? null}
-        accountName={connection?.accountName ?? null}
-        connectionState={status?.connectionState ?? 'local-only'}
-        currentDeviceName={status?.currentDevice?.deviceName ?? connection?.currentDevice?.deviceName ?? null}
-        pendingPushCount={status?.pendingPushCount ?? 0}
-        unreadConflictCount={status?.unreadConflictCount ?? 0}
-        lastPushAt={status?.lastPushAt ?? null}
-        lastPullAt={status?.lastPullAt ?? null}
-        lastError={error ?? status?.lastError ?? null}
-        onSyncNow={() => void syncNow()}
-        extra={
-          connection?.localOnly ? (
-            <article
-              style={{
-                borderRadius: 'var(--radius-md)',
-                border: '1px dashed var(--color-border-subtle)',
-                padding: 'var(--space-lg)',
-                background: 'rgba(231, 222, 208, 0.35)',
-              }}
-            >
-              <strong>{t('sync.localModeTitle')}</strong>
-              <p style={{ marginBottom: 'var(--space-md)', color: 'var(--color-text-muted)' }}>
-                {t('sync.localModeBody')}
-              </p>
-              <button
-                type="button"
-                onClick={resumeRegistration}
+      {activeTab === 'overview' ? (
+        <SyncOverviewPanel
+          remoteAddress={status?.remoteAddress ?? connection?.remoteAddress ?? null}
+          accountName={connection?.accountName ?? null}
+          connectionState={status?.connectionState ?? 'local-only'}
+          currentDeviceName={status?.currentDevice?.deviceName ?? connection?.currentDevice?.deviceName ?? null}
+          pendingPushCount={status?.pendingPushCount ?? 0}
+          unreadConflictCount={status?.unreadConflictCount ?? 0}
+          lastPushAt={status?.lastPushAt ?? null}
+          lastPullAt={status?.lastPullAt ?? null}
+          lastError={error ?? status?.lastError ?? null}
+          onSyncNow={() => void syncNow()}
+          extra={
+            connection?.localOnly ? (
+              <article
                 style={{
-                  border: '1px solid var(--color-border-subtle)',
                   borderRadius: 'var(--radius-md)',
-                  background: 'transparent',
-                  padding: '10px 14px',
-                  cursor: 'pointer',
+                  border: '1px dashed var(--color-border-subtle)',
+                  padding: 'var(--space-lg)',
+                  background: 'rgba(231, 222, 208, 0.35)',
                 }}
               >
-                {t('sync.finishRegistration')}
-              </button>
-            </article>
-          ) : null
-        }
-      />
+                <strong>{t('sync.localModeTitle')}</strong>
+                <p style={{ marginBottom: 'var(--space-md)', color: 'var(--color-text-muted)' }}>
+                  {t('sync.localModeBody')}
+                </p>
+                <button
+                  type="button"
+                  onClick={resumeRegistration}
+                  style={{
+                    border: '1px solid var(--color-border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'transparent',
+                    padding: '10px 14px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t('sync.finishRegistration')}
+                </button>
+              </article>
+            ) : null
+          }
+        />
+      ) : null}
 
-      <section style={{ display: 'grid', gap: 'var(--space-md)' }}>
-        <h2 style={{ margin: 0 }}>{t('sync.historyTitle')}</h2>
-        <article
-          style={{
-            borderRadius: 'var(--radius-lg)',
-            border: '1px dashed var(--color-border-subtle)',
-            background: 'rgba(231, 222, 208, 0.25)',
-            padding: 'var(--space-xl)',
-          }}
-        >
-          {t('sync.historyPlaceholder')}
-        </article>
-      </section>
+      {activeTab === 'history' ? <SyncHistoryPanel rounds={rounds} /> : null}
 
-      <section style={{ display: 'grid', gap: 'var(--space-md)' }}>
-        <h2 style={{ margin: 0 }}>{t('sync.conflictsTitle')}</h2>
-        <article
-          style={{
-            borderRadius: 'var(--radius-lg)',
-            border: '1px dashed var(--color-border-subtle)',
-            background: 'rgba(231, 222, 208, 0.25)',
-            padding: 'var(--space-xl)',
-          }}
-        >
-          {t('sync.conflictsPlaceholder')}
-        </article>
-      </section>
+      {activeTab === 'conflicts' ? (
+        <SyncConflictsPanel
+          conflicts={conflicts}
+          selectedConflictId={selectedConflictId}
+          onSelectConflict={(conflictId) => void handleSelectConflict(conflictId)}
+        />
+      ) : null}
 
-      <SyncDevicesPanel
-        currentDeviceId={connection?.currentDevice?.id ?? null}
-        devices={devices}
-        onRevoke={(deviceId) => void revokeDevice(deviceId)}
-      />
+      {activeTab === 'devices' ? (
+        <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
+          <SyncDevicesPanel
+            currentDeviceId={connection?.currentDevice?.id ?? null}
+            devices={devices}
+            onRevoke={(deviceId) => void revokeDevice(deviceId)}
+          />
 
-      <button
-        type="button"
-        onClick={() => void refreshDevices()}
-        style={{
-          justifySelf: 'start',
-          border: '1px solid var(--color-border-subtle)',
-          borderRadius: 'var(--radius-md)',
-          background: 'transparent',
-          padding: '10px 14px',
-          cursor: 'pointer',
-        }}
-      >
-        {t('sync.refreshDevices')}
-      </button>
+          <button
+            type="button"
+            onClick={() => void refreshDevices()}
+            style={{
+              justifySelf: 'start',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              background: 'transparent',
+              padding: '10px 14px',
+              cursor: 'pointer',
+            }}
+          >
+            {t('sync.refreshDevices')}
+          </button>
+        </div>
+      ) : null}
 
       <DeviceRegistrationDialog
         isOpen={registrationOpen}

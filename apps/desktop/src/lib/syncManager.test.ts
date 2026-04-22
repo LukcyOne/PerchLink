@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SyncOutboxChange, SyncPullResponse, SyncPushResponse } from '@perchlink/core';
+import type { SyncOutboxChange, SyncPullResponse, SyncPushResponse, SyncRoundRecord } from '@perchlink/core';
 import { createDesktopSyncManager } from './syncManager';
-import type { DesktopSyncConnectionRecord } from './syncClient';
+import { SyncRequestError, type DesktopSyncBootstrapPayload, type DesktopSyncConnectionRecord } from './syncClient';
 
 function createConnectedRecord(): DesktopSyncConnectionRecord {
   return {
@@ -28,6 +28,15 @@ function createConnectedRecord(): DesktopSyncConnectionRecord {
   };
 }
 
+function createEmptyBootstrapPayload(): DesktopSyncBootstrapPayload {
+  return {
+    serverCursor: 0,
+    bookmarks: [],
+    categories: [],
+    collections: [],
+  };
+}
+
 describe('desktopSyncManager', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -40,6 +49,7 @@ describe('desktopSyncManager', () => {
 
   it('collapses repeated local mutations into one debounced push round', async () => {
     let connection = createConnectedRecord();
+    const recordRound = vi.fn(async (_round: SyncRoundRecord) => {});
     const listOutbox = vi.fn<() => Promise<SyncOutboxChange[]>>().mockResolvedValue([
       {
         changeId: 'change-1',
@@ -96,10 +106,14 @@ describe('desktopSyncManager', () => {
         listOutbox,
         ackPushResults: vi.fn(async () => {}),
         applyRemoteEvents: vi.fn(async () => {}),
+        recordRound,
+        prepareResync: vi.fn(async () => {}),
+        rebuildSyncState: vi.fn(async (_payload: DesktopSyncBootstrapPayload) => {}),
       },
       {
         pushChanges,
         pullChanges,
+        fetchBootstrap: vi.fn(async () => createEmptyBootstrapPayload()),
       },
     );
 
@@ -117,11 +131,13 @@ describe('desktopSyncManager', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(pushChanges).toHaveBeenCalledTimes(1);
     expect(pullChanges).toHaveBeenCalledTimes(1);
+    expect(recordRound).toHaveBeenCalled();
   });
 
   it('does not advance into a second round when applying pulled events fails', async () => {
     let connection = createConnectedRecord();
     const applyRemoteEvents = vi.fn().mockRejectedValue(new Error('apply failed'));
+    const recordRound = vi.fn(async (_round: SyncRoundRecord) => {});
     const saveConnection = vi.fn(async (next: DesktopSyncConnectionRecord) => {
       connection = next;
       return next;
@@ -135,6 +151,9 @@ describe('desktopSyncManager', () => {
         listOutbox: vi.fn(async () => []),
         ackPushResults: vi.fn(async () => {}),
         applyRemoteEvents,
+        recordRound,
+        prepareResync: vi.fn(async () => {}),
+        rebuildSyncState: vi.fn(async (_payload: DesktopSyncBootstrapPayload) => {}),
       },
       {
         pushChanges: vi.fn(async () => ({
@@ -181,12 +200,14 @@ describe('desktopSyncManager', () => {
             },
           ],
         }) satisfies SyncPullResponse),
+        fetchBootstrap: vi.fn(async () => createEmptyBootstrapPayload()),
       },
     );
 
     await manager.start();
     expect(applyRemoteEvents).toHaveBeenCalledTimes(1);
     expect(saveConnection).toHaveBeenLastCalledWith(expect.objectContaining({ lastError: 'apply failed', syncing: false }));
+    expect(recordRound).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed', message: 'apply failed' }));
   });
 
   it('treats pull replay from the current device as a normal pull without triggering another push', async () => {
@@ -197,6 +218,7 @@ describe('desktopSyncManager', () => {
       results: [],
     });
     const applyRemoteEvents = vi.fn().mockResolvedValue(undefined);
+    const recordRound = vi.fn(async (_round: SyncRoundRecord) => {});
 
     const manager = createDesktopSyncManager(
       {
@@ -209,6 +231,9 @@ describe('desktopSyncManager', () => {
         listOutbox: vi.fn(async () => []),
         ackPushResults: vi.fn(async () => {}),
         applyRemoteEvents,
+        recordRound,
+        prepareResync: vi.fn(async () => {}),
+        rebuildSyncState: vi.fn(async (_payload: DesktopSyncBootstrapPayload) => {}),
       },
       {
         pushChanges,
@@ -251,11 +276,110 @@ describe('desktopSyncManager', () => {
             },
           ],
         }) satisfies SyncPullResponse),
+        fetchBootstrap: vi.fn(async () => createEmptyBootstrapPayload()),
       },
     );
 
     await manager.start();
     expect(pushChanges).toHaveBeenCalledTimes(0);
     expect(applyRemoteEvents).toHaveBeenCalledTimes(1);
+    expect(recordRound).toHaveBeenCalledWith(expect.objectContaining({ status: 'succeeded', pullCount: 1 }));
+  });
+
+  it('prepares and rebuilds local sync state when the cursor expires', async () => {
+    let connection = createConnectedRecord();
+    const prepareResync = vi.fn(async () => {});
+    const rebuildSyncState = vi.fn(async (_payload: DesktopSyncBootstrapPayload) => {});
+    const fetchBootstrap = vi.fn(async () => ({
+      serverCursor: 8,
+      bookmarks: [],
+      categories: [],
+      collections: [],
+    }));
+    const recordRound = vi.fn(async (_round: SyncRoundRecord) => {});
+
+    const manager = createDesktopSyncManager(
+      {
+        getConnection: vi.fn(async () => connection),
+        saveConnection: vi.fn(async (next) => {
+          connection = next;
+          return next;
+        }),
+        getStatus: vi.fn(),
+        listOutbox: vi.fn(async () => []),
+        ackPushResults: vi.fn(async () => {}),
+        applyRemoteEvents: vi.fn(async () => {}),
+        recordRound,
+        prepareResync,
+        rebuildSyncState,
+      },
+      {
+        pushChanges: vi.fn(async () => ({
+          device: connection.currentDevice!,
+          serverCursor: 0,
+          results: [],
+        })),
+        pullChanges: vi.fn(async () => ({
+          serverCursor: 0,
+          resyncRequired: true,
+          events: [],
+        })),
+        fetchBootstrap,
+      },
+    );
+
+    await manager.start();
+
+    expect(prepareResync).toHaveBeenCalledTimes(1);
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+    expect(rebuildSyncState).toHaveBeenCalledWith(expect.objectContaining({ serverCursor: 8 }));
+    expect(recordRound).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed', message: 'cursor_expired' }));
+  });
+
+  it('falls back to local-only mode when the server revokes the current device', async () => {
+    let connection = createConnectedRecord();
+    const saveConnection = vi.fn(async (next: DesktopSyncConnectionRecord) => {
+      connection = next;
+      return next;
+    });
+    const recordRound = vi.fn(async (_round: SyncRoundRecord) => {});
+
+    const manager = createDesktopSyncManager(
+      {
+        getConnection: vi.fn(async () => connection),
+        saveConnection,
+        getStatus: vi.fn(),
+        listOutbox: vi.fn(async () => []),
+        ackPushResults: vi.fn(async () => {}),
+        applyRemoteEvents: vi.fn(async () => {}),
+        recordRound,
+        prepareResync: vi.fn(async () => {}),
+        rebuildSyncState: vi.fn(async (_payload: DesktopSyncBootstrapPayload) => {}),
+      },
+      {
+        pushChanges: vi.fn(async () => ({
+          device: connection.currentDevice!,
+          serverCursor: 0,
+          results: [],
+        })),
+        pullChanges: vi.fn(async () => {
+          throw new SyncRequestError('This sync device has been revoked.', 'device_revoked', 403);
+        }),
+        fetchBootstrap: vi.fn(async () => createEmptyBootstrapPayload()),
+      },
+    );
+
+    await manager.start();
+
+    expect(saveConnection).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        localOnly: true,
+        registrationRequired: true,
+        deviceToken: null,
+        currentDevice: null,
+        lastError: 'device_revoked',
+      }),
+    );
+    expect(recordRound).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed', message: 'device_revoked' }));
   });
 });

@@ -1,11 +1,13 @@
 import { create } from 'zustand';
-import type { SyncDeviceRecord, SyncStatusSnapshot } from '@perchlink/core';
+import type { SyncConflictRecord, SyncDeviceRecord, SyncRoundRecord, SyncStatusSnapshot } from '@perchlink/core';
 import { desktopSyncManager } from '../../../apps/desktop/src/lib/syncManager';
 import {
-  clearStoredSyncConnection,
   getDesktopSyncStatus,
   getStoredSyncConnection,
+  listDesktopSyncConflicts,
+  listDesktopSyncRounds,
   listSyncDevices,
+  markDesktopSyncConflictRead,
   registerSyncDevice,
   revokeSyncDevice,
   saveStoredSyncConnection,
@@ -18,6 +20,8 @@ export interface SyncStoreState {
   connection: DesktopSyncConnectionRecord | null;
   status: SyncStatusSnapshot | null;
   devices: SyncDeviceRecord[];
+  rounds: SyncRoundRecord[];
+  conflicts: SyncConflictRecord[];
   remoteAddressDraft: string;
   accountDraft: string;
   passwordDraft: string;
@@ -34,6 +38,7 @@ export interface SyncStoreState {
   syncNow: () => Promise<void>;
   refreshDevices: () => Promise<void>;
   revokeDevice: (deviceId: string) => Promise<void>;
+  markConflictRead: (conflictId: string) => Promise<void>;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -41,14 +46,21 @@ function toErrorMessage(error: unknown): string {
 }
 
 async function loadConnectionState() {
-  const [connection, status] = await Promise.all([getStoredSyncConnection(), getDesktopSyncStatus()]);
-  return { connection, status };
+  const [connection, status, rounds, conflicts] = await Promise.all([
+    getStoredSyncConnection(),
+    getDesktopSyncStatus(),
+    listDesktopSyncRounds(),
+    listDesktopSyncConflicts(),
+  ]);
+  return { connection, status, rounds, conflicts };
 }
 
 export const useSyncStore = create<SyncStoreState>((set, get) => ({
   connection: null,
   status: null,
   devices: [],
+  rounds: [],
+  conflicts: [],
   remoteAddressDraft: 'http://127.0.0.1:8787',
   accountDraft: '',
   passwordDraft: '',
@@ -58,12 +70,14 @@ export const useSyncStore = create<SyncStoreState>((set, get) => ({
   error: null,
   setDrafts: (patch) => set(patch),
   hydrate: async () => {
-    const { connection, status } = await loadConnectionState();
+    const { connection, status, rounds, conflicts } = await loadConnectionState();
     const devices = connection ? await listSyncDevices(connection).catch(() => []) : [];
       set({
         connection,
         status,
         devices,
+        rounds,
+        conflicts,
         registrationOpen: Boolean(connection?.registrationRequired && !connection?.localOnly),
       deviceNameDraft: connection?.currentDevice?.deviceName ?? get().deviceNameDraft,
       remoteAddressDraft: connection?.remoteAddress ?? get().remoteAddressDraft,
@@ -208,5 +222,27 @@ export const useSyncStore = create<SyncStoreState>((set, get) => ({
       set({ isBusy: false, error: toErrorMessage(error) });
       throw error;
     }
+  },
+  markConflictRead: async (conflictId) => {
+    await markDesktopSyncConflictRead(conflictId);
+    set((state) => ({
+      conflicts: state.conflicts.map((conflict) =>
+        conflict.id === conflictId
+          ? {
+              ...conflict,
+              unread: false,
+            }
+          : conflict,
+      ),
+      status: state.status
+        ? {
+            ...state.status,
+            unreadConflictCount: Math.max(
+              0,
+              state.status.unreadConflictCount - (state.conflicts.some((conflict) => conflict.id === conflictId && conflict.unread) ? 1 : 0),
+            ),
+          }
+        : null,
+    }));
   },
 }));

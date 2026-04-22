@@ -3,7 +3,12 @@ import { compare } from 'bcryptjs';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { loadSyncEntitySnapshot } from '../services/syncEvents.js';
+import {
+  loadBookmarkSyncSnapshot,
+  loadCategorySyncSnapshot,
+  loadCollectionSyncSnapshot,
+  loadSyncEntitySnapshot,
+} from '../services/syncEvents.js';
 import {
   SyncMutationError,
   deleteBookmarkCanonical,
@@ -294,32 +299,252 @@ function validateBookmarkSnapshot(shape: SyncEntitySnapshot): SyncBookmarkSnapsh
   });
 }
 
-function validateBaseVersion(change: SyncOutboxChange, current: SyncEntitySnapshot | null): SyncPushResult | null {
+function listChangedFieldsSince(
+  app: FastifyInstance,
+  accountId: string,
+  entityType: SyncEntityType,
+  entityId: string,
+  baseVersion: number,
+): Set<string> {
+  const rows = app.db
+    .prepare(
+      `
+        SELECT changed_fields_json
+        FROM sync_events
+        WHERE account_id = ?
+          AND entity_type = ?
+          AND entity_id = ?
+          AND entity_version > ?
+        ORDER BY seq ASC
+      `,
+    )
+    .all(accountId, entityType, entityId, baseVersion) as Array<{ changed_fields_json: string }>;
+  const changedFields = new Set<string>();
+
+  for (const row of rows) {
+    const fields = JSON.parse(row.changed_fields_json || '[]') as string[];
+    for (const field of fields) {
+      changedFields.add(field);
+    }
+  }
+
+  return changedFields;
+}
+
+function hasFieldOverlap(localFields: string[], remoteFields: Set<string>): boolean {
+  return localFields.some((field) => remoteFields.has(field));
+}
+
+function mergeBookmarkSnapshot(
+  current: SyncBookmarkSnapshot,
+  incoming: SyncBookmarkSnapshot,
+  changedFields: string[],
+): SyncBookmarkSnapshot {
+  const next: SyncBookmarkSnapshot = {
+    ...current,
+    normalizedUrl: current.normalizedUrl,
+  };
+
+  for (const field of changedFields) {
+    switch (field) {
+      case 'url':
+        next.url = incoming.url;
+        next.normalizedUrl = normalizeSyncBookmarkUrl(incoming.url);
+        break;
+      case 'title':
+        next.title = incoming.title;
+        break;
+      case 'description':
+        next.description = incoming.description;
+        next.descriptionExcerpt = incoming.descriptionExcerpt;
+        break;
+      case 'favicon':
+        next.favicon = incoming.favicon;
+        break;
+      case 'coverUrl':
+        next.coverUrl = incoming.coverUrl;
+        break;
+      case 'primaryCategoryId':
+        next.primaryCategoryId = incoming.primaryCategoryId;
+        break;
+      case 'isStarred':
+        next.isStarred = incoming.isStarred;
+        break;
+      case 'processingStatus':
+        next.processingStatus = incoming.processingStatus;
+        break;
+      case 'processingError':
+        next.processingError = incoming.processingError;
+        break;
+      case 'userEditedMask':
+        next.userEditedMask = incoming.userEditedMask;
+        break;
+      case 'tags':
+        next.tags = incoming.tags;
+        break;
+      case 'collectionIds':
+        next.collectionIds = incoming.collectionIds;
+        break;
+      case 'deletedAt':
+        next.deletedAt = incoming.deletedAt;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return validateBookmarkSnapshot(next);
+}
+
+function mergeCategorySnapshot(
+  current: SyncCategorySnapshot,
+  incoming: SyncCategorySnapshot,
+  changedFields: string[],
+): SyncCategorySnapshot {
+  const next: SyncCategorySnapshot = { ...current };
+
+  for (const field of changedFields) {
+    switch (field) {
+      case 'name':
+        next.name = incoming.name;
+        break;
+      case 'slug':
+        next.slug = incoming.slug;
+        break;
+      case 'parentId':
+        next.parentId = incoming.parentId;
+        break;
+      case 'sortOrder':
+        next.sortOrder = incoming.sortOrder;
+        break;
+      case 'isSystem':
+        next.isSystem = incoming.isSystem;
+        break;
+      case 'deletedAt':
+        next.deletedAt = incoming.deletedAt;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return categorySnapshotSchema.parse(next) as SyncCategorySnapshot;
+}
+
+function mergeCollectionSnapshot(
+  current: SyncCollectionSnapshot,
+  incoming: SyncCollectionSnapshot,
+  changedFields: string[],
+): SyncCollectionSnapshot {
+  const next: SyncCollectionSnapshot = { ...current };
+
+  for (const field of changedFields) {
+    switch (field) {
+      case 'name':
+        next.name = incoming.name;
+        break;
+      case 'description':
+        next.description = incoming.description;
+        break;
+      case 'sortOrder':
+        next.sortOrder = incoming.sortOrder;
+        break;
+      case 'deletedAt':
+        next.deletedAt = incoming.deletedAt;
+        break;
+      default:
+        break;
+    }
+  }
+
+  return collectionSnapshotSchema.parse(next) as SyncCollectionSnapshot;
+}
+
+function validateIncomingSnapshot(change: SyncOutboxChange): SyncEntitySnapshot {
+  switch (change.entityType) {
+    case 'bookmark':
+      return validateBookmarkSnapshot(change.snapshot);
+    case 'category':
+      return categorySnapshotSchema.parse(change.snapshot) as SyncCategorySnapshot;
+    case 'collection':
+      return collectionSnapshotSchema.parse(change.snapshot) as SyncCollectionSnapshot;
+    default:
+      throw new SyncMutationError('validation_failed', `Unsupported sync entity type: ${change.entityType}`);
+  }
+}
+
+function mergeIncomingSnapshot(
+  current: SyncEntitySnapshot,
+  incoming: SyncEntitySnapshot,
+  changedFields: string[],
+): SyncEntitySnapshot {
+  switch (current.entityType) {
+    case 'bookmark':
+      return mergeBookmarkSnapshot(current, incoming as SyncBookmarkSnapshot, changedFields);
+    case 'category':
+      return mergeCategorySnapshot(current, incoming as SyncCategorySnapshot, changedFields);
+    case 'collection':
+      return mergeCollectionSnapshot(current, incoming as SyncCollectionSnapshot, changedFields);
+    default:
+      return incoming;
+  }
+}
+
+function validateBaseVersion(
+  app: FastifyInstance,
+  accountId: string,
+  change: SyncOutboxChange,
+  current: SyncEntitySnapshot | null,
+): SyncPushResult | { status: 'accepted' | 'accepted_merged'; snapshot: SyncEntitySnapshot } {
   if (change.operation === 'delete') {
     if (!current || current.deletedAt) {
       return buildPushResult(change, 'noop', 'deleted_on_server', current, null);
     }
 
-    if (change.baseVersion !== current.version) {
-      return buildPushResult(change, 'conflict', current.deletedAt ? 'deleted_on_server' : 'base_version_conflict', current, null);
-    }
-
-    return null;
+    return {
+      status: 'accepted',
+      snapshot: current,
+    };
   }
+
+  const incomingSnapshot = validateIncomingSnapshot(change);
 
   if (!current) {
     if (change.baseVersion !== null && change.baseVersion > 0) {
       return buildPushResult(change, 'conflict', 'deleted_on_server', null, null);
     }
 
-    return null;
+    return {
+      status: 'accepted',
+      snapshot: incomingSnapshot,
+    };
   }
 
-  if (change.baseVersion !== current.version) {
-    return buildPushResult(change, 'conflict', current.deletedAt ? 'deleted_on_server' : 'base_version_conflict', current, null);
+  if (current.deletedAt) {
+    return buildPushResult(change, 'conflict', 'deleted_on_server', current, null);
   }
 
-  return null;
+  if (change.baseVersion === current.version) {
+    return {
+      status: 'accepted',
+      snapshot: incomingSnapshot,
+    };
+  }
+
+  if (change.baseVersion === null || change.baseVersion <= 0 || change.baseVersion > current.version) {
+    return buildPushResult(change, 'conflict', 'base_version_conflict', current, null);
+  }
+
+  const remoteChangedFields = listChangedFieldsSince(app, accountId, change.entityType, change.entityId, change.baseVersion);
+
+  if (hasFieldOverlap(change.changedFields, remoteChangedFields)) {
+    return buildPushResult(change, 'conflict', 'base_version_conflict', current, null);
+  }
+
+  return {
+    status: 'accepted_merged',
+    snapshot: mergeIncomingSnapshot(current, incomingSnapshot, change.changedFields),
+  };
 }
 
 function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: DeviceRow, change: SyncOutboxChange): SyncPushResult {
@@ -336,11 +561,11 @@ function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: 
 
   return app.db.transaction(() => {
     const current = loadSyncEntitySnapshot(app.db, change.entityType, change.entityId);
-    const versionConflict = validateBaseVersion(change, current);
+    const versionResolution = validateBaseVersion(app, request.currentAccount!.id, change, current);
 
-    if (versionConflict) {
-      persistPushReceipt(app, request, device.id, versionConflict);
-      return versionConflict;
+    if ('changeId' in versionResolution) {
+      persistPushReceipt(app, request, device.id, versionResolution);
+      return versionResolution;
     }
 
     try {
@@ -362,12 +587,12 @@ function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: 
           const event = upsertBookmarkCanonical({
             db: app.db,
             accountId: request.currentAccount!.id,
-            snapshot: validateBookmarkSnapshot(change.snapshot),
+            snapshot: versionResolution.snapshot as SyncBookmarkSnapshot,
             writerKind: change.writerKind,
             actorDeviceId: device.id,
             changedFields: change.changedFields,
           });
-          const result = buildPushResult(change, 'accepted', null, event.snapshot, event.seq);
+          const result = buildPushResult(change, versionResolution.status, null, event.snapshot, event.seq);
           persistPushReceipt(app, request, device.id, result);
           return result;
         }
@@ -385,16 +610,15 @@ function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: 
             return result;
           }
 
-          const snapshot = categorySnapshotSchema.parse(change.snapshot) as SyncCategorySnapshot;
           const event = upsertCategoryCanonical({
             db: app.db,
             accountId: request.currentAccount!.id,
-            snapshot,
+            snapshot: versionResolution.snapshot as SyncCategorySnapshot,
             writerKind: change.writerKind,
             actorDeviceId: device.id,
             changedFields: change.changedFields,
           });
-          const result = buildPushResult(change, 'accepted', null, event.snapshot, event.seq);
+          const result = buildPushResult(change, versionResolution.status, null, event.snapshot, event.seq);
           persistPushReceipt(app, request, device.id, result);
           return result;
         }
@@ -412,16 +636,15 @@ function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: 
             return result;
           }
 
-          const snapshot = collectionSnapshotSchema.parse(change.snapshot) as SyncCollectionSnapshot;
           const event = upsertCollectionCanonical({
             db: app.db,
             accountId: request.currentAccount!.id,
-            snapshot,
+            snapshot: versionResolution.snapshot as SyncCollectionSnapshot,
             writerKind: change.writerKind,
             actorDeviceId: device.id,
             changedFields: change.changedFields,
           });
-          const result = buildPushResult(change, 'accepted', null, event.snapshot, event.seq);
+          const result = buildPushResult(change, versionResolution.status, null, event.snapshot, event.seq);
           persistPushReceipt(app, request, device.id, result);
           return result;
         }
@@ -433,7 +656,13 @@ function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: 
       }
     } catch (error) {
       if (error instanceof SyncMutationError) {
-        const result = buildPushResult(change, 'rejected', error.reasonCode, current, null);
+        const result = buildPushResult(
+          change,
+          error.reasonCode === 'duplicate_natural_key' ? 'conflict' : 'rejected',
+          error.reasonCode,
+          current,
+          null,
+        );
         persistPushReceipt(app, request, device.id, result);
         return result;
       }
@@ -441,6 +670,56 @@ function applySyncChange(app: FastifyInstance, request: FastifyRequest, device: 
       throw error;
     }
   })();
+}
+
+function loadBootstrapState(app: FastifyInstance, accountId: string) {
+  const bookmarkIds = app.db
+    .prepare(
+      `
+        SELECT id
+        FROM bookmarks
+        ORDER BY updated_at ASC, created_at ASC, id ASC
+      `,
+    )
+    .all() as Array<{ id: string }>;
+  const categoryIds = app.db
+    .prepare(
+      `
+        SELECT id
+        FROM categories
+        ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END ASC, sort_order ASC, name COLLATE NOCASE ASC, id ASC
+      `,
+    )
+    .all() as Array<{ id: string }>;
+  const collectionIds = app.db
+    .prepare(
+      `
+        SELECT id
+        FROM collections
+        ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC
+      `,
+    )
+    .all() as Array<{ id: string }>;
+  const maxSeq = Number(
+    (
+      app.db.prepare('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM sync_events WHERE account_id = ?').get(accountId) as {
+        max_seq: number;
+      }
+    ).max_seq,
+  );
+
+  return {
+    serverCursor: maxSeq,
+    bookmarks: bookmarkIds
+      .map((row) => loadBookmarkSyncSnapshot(app.db, row.id))
+      .filter((snapshot): snapshot is SyncBookmarkSnapshot => snapshot !== null),
+    categories: categoryIds
+      .map((row) => loadCategorySyncSnapshot(app.db, row.id))
+      .filter((snapshot): snapshot is SyncCategorySnapshot => snapshot !== null),
+    collections: collectionIds
+      .map((row) => loadCollectionSyncSnapshot(app.db, row.id))
+      .filter((snapshot): snapshot is SyncCollectionSnapshot => snapshot !== null),
+  };
 }
 
 export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
@@ -601,6 +880,24 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  app.get('/api/sync/bootstrap', { preHandler: app.requireDevice }, async (request) => {
+    const device = loadCurrentDevice(app, request);
+    const snapshot = loadBootstrapState(app, request.currentAccount!.id);
+    const timestamp = nowIso();
+
+    app.db
+      .prepare(
+        `
+          UPDATE devices
+          SET last_cursor = ?, last_seen_at = ?, updated_at = ?
+          WHERE id = ?
+        `,
+      )
+      .run(Math.max(device.last_cursor, snapshot.serverCursor), timestamp, timestamp, device.id);
+
+    return snapshot;
+  });
+
   app.get('/api/sync/pull', { preHandler: app.requireDevice }, async (request, reply) => {
     const device = loadCurrentDevice(app, request);
     const query = syncPullQuerySchema.parse(request.query ?? {});
@@ -616,6 +913,7 @@ export async function registerSyncRoutes(app: FastifyInstance): Promise<void> {
       reply.code(409).send({
         serverCursor: maxSeq,
         resyncRequired: true,
+        reasonCode: 'cursor_expired',
         events: [],
       });
       return;

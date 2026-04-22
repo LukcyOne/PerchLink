@@ -1,8 +1,13 @@
 import type {
+  SyncBookmarkSnapshot,
+  SyncCategorySnapshot,
+  SyncCollectionSnapshot,
+  SyncConflictRecord,
   SyncDeviceRecord,
   SyncOutboxChange,
   SyncPullResponse,
   SyncPushResponse,
+  SyncRoundRecord,
   SyncStatusSnapshot,
 } from '@perchlink/core';
 import { invokeDesktop } from './desktopBridge';
@@ -35,6 +40,29 @@ interface DeviceRegistrationPayload {
   device_token: string;
 }
 
+export interface DesktopSyncBootstrapPayload {
+  serverCursor: number;
+  bookmarks: SyncBookmarkSnapshot[];
+  categories: SyncCategorySnapshot[];
+  collections: SyncCollectionSnapshot[];
+}
+
+interface SyncErrorPayload {
+  message?: string;
+  code?: string;
+}
+
+export class SyncRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string | null,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'SyncRequestError';
+  }
+}
+
 function normalizeRemoteAddress(remoteAddress: string): string {
   return remoteAddress.replace(/\/+$/, '');
 }
@@ -60,11 +88,15 @@ async function requestSyncJson<T>(
   });
 
   const text = await response.text();
-  const payload = text.length > 0 ? (JSON.parse(text) as T | { message?: string; code?: string }) : null;
+  const payload = text.length > 0 ? (JSON.parse(text) as T | SyncErrorPayload) : null;
 
   if (!response.ok) {
-    const errorPayload = (payload ?? {}) as { message?: string; code?: string };
-    throw new Error(errorPayload.message ?? errorPayload.code ?? 'Sync request failed.');
+    const errorPayload = (payload ?? {}) as SyncErrorPayload;
+    throw new SyncRequestError(
+      errorPayload.message ?? errorPayload.code ?? 'Sync request failed.',
+      errorPayload.code ?? null,
+      response.status,
+    );
   }
 
   return payload as T;
@@ -96,6 +128,30 @@ export async function ackDesktopSyncPushResults(results: SyncPushResponse['resul
 
 export async function applyDesktopRemoteEvents(events: SyncPullResponse['events'], serverCursor: number): Promise<void> {
   await invokeDesktop('desktop_apply_remote_events', { events, serverCursor });
+}
+
+export async function listDesktopSyncRounds(): Promise<SyncRoundRecord[]> {
+  return invokeDesktop<SyncRoundRecord[]>('desktop_list_sync_rounds');
+}
+
+export async function recordDesktopSyncRound(round: SyncRoundRecord): Promise<void> {
+  await invokeDesktop('desktop_record_sync_round', { round });
+}
+
+export async function listDesktopSyncConflicts(): Promise<SyncConflictRecord[]> {
+  return invokeDesktop<SyncConflictRecord[]>('desktop_list_sync_conflicts');
+}
+
+export async function markDesktopSyncConflictRead(conflictId: string): Promise<void> {
+  await invokeDesktop('desktop_mark_sync_conflict_read', { conflictId });
+}
+
+export async function prepareDesktopSyncResync(): Promise<void> {
+  await invokeDesktop('desktop_prepare_sync_resync');
+}
+
+export async function rebuildDesktopSyncState(payload: DesktopSyncBootstrapPayload): Promise<void> {
+  await invokeDesktop('desktop_rebuild_sync_state', { payload });
 }
 
 export async function signInForSync(input: {
@@ -190,6 +246,18 @@ export async function pullSyncChanges(
   return requestSyncJson<SyncPullResponse>(
     connection.remoteAddress,
     `/api/sync/pull?cursor=${cursor}&limit=${limit}`,
+    connection.deviceToken,
+  );
+}
+
+export async function fetchSyncBootstrap(connection: DesktopSyncConnectionRecord): Promise<DesktopSyncBootstrapPayload> {
+  if (!connection.remoteAddress || !connection.deviceToken) {
+    throw new Error('Sync device is not registered.');
+  }
+
+  return requestSyncJson<DesktopSyncBootstrapPayload>(
+    connection.remoteAddress,
+    '/api/sync/bootstrap',
     connection.deviceToken,
   );
 }

@@ -3,7 +3,7 @@ import { Routes, Route, MemoryRouter, useLocation, useNavigate } from 'react-rou
 import { getShellNavigationItem, shellNavigation, type TagRecord, type NavItemId } from '@perchlink/core';
 import { i18nInstance, useLocale } from '@perchlink/i18n';
 import { useBookmarksStore, useSyncStore } from '@perchlink/store';
-import { AppShell, BookmarkViewToggle, SearchToolbar, SyncStatusPill } from '@perchlink/ui';
+import { AppShell, BookmarkViewToggle, SearchToolbar, SyncAttentionToast, SyncStatusPill } from '@perchlink/ui';
 import { desktopBookmarkRepository } from '../lib/repositories/desktopBookmarkRepository';
 import { desktopSyncManager } from '../lib/syncManager';
 import { AllBookmarksPage } from '../pages/AllBookmarksPage';
@@ -30,6 +30,14 @@ function resolveActiveNavId(pathname: string): NavItemId {
     default:
       return 'all-bookmarks';
   }
+}
+
+function getSyncCenterHref(unreadConflictId: string | null): string {
+  if (!unreadConflictId) {
+    return '/sync-center';
+  }
+
+  return `/sync-center?tab=conflicts&conflictId=${encodeURIComponent(unreadConflictId)}`;
 }
 
 function collectAvailableTags(bookmarks: ReturnType<typeof useBookmarksStore.getState>['bookmarks']): TagRecord[] {
@@ -61,10 +69,13 @@ function DesktopShellRoutes() {
     setActiveView,
     setSearchTerm,
   } = useBookmarksStore();
-  const { status, hydrate: hydrateSync } = useSyncStore();
+  const { status, conflicts, hydrate: hydrateSync } = useSyncStore();
   const activeNavId = resolveActiveNavId(location.pathname);
   const activeNavigationItem = getShellNavigationItem(activeNavId);
   const availableTags = collectAvailableTags(bookmarks);
+  const latestUnreadConflict = conflicts.find((conflict) => conflict.unread) ?? null;
+  const latestUnreadConflictId = latestUnreadConflict?.id ?? null;
+  const syncCenterHref = getSyncCenterHref(latestUnreadConflictId);
 
   useEffect(() => {
     configureRepository(desktopBookmarkRepository);
@@ -78,6 +89,12 @@ function DesktopShellRoutes() {
     void hydrateSync();
   }, [hydrateSync]);
 
+  useEffect(() => {
+    return desktopSyncManager.subscribe(() => {
+      void hydrateSync();
+    });
+  }, [hydrateSync]);
+
   const syncTone =
     status?.connectionState === 'up-to-date'
       ? 'positive'
@@ -86,12 +103,12 @@ function DesktopShellRoutes() {
         : 'muted';
   const syncLabel =
     status?.connectionState === 'up-to-date'
-      ? 'Up to Date'
+      ? i18nInstance.t('sync.statusUpToDate', { lng: locale })
       : status?.connectionState === 'syncing'
-        ? 'Syncing...'
+        ? i18nInstance.t('sync.statusSyncing', { lng: locale })
         : status?.connectionState === 'needs-attention'
-          ? 'Sync Needs Attention'
-          : 'Local Mode';
+          ? i18nInstance.t('sync.statusNeedsAttention', { lng: locale })
+          : i18nInstance.t('sync.statusLocalOnly', { lng: locale });
 
   return (
     <AppShell
@@ -106,9 +123,14 @@ function DesktopShellRoutes() {
       primaryActionLabel={i18nInstance.t('shell.primaryCta', { lng: locale })}
       onPrimaryAction={openQuickAdd}
       resolveNavLabel={(labelKey) => i18nInstance.t(labelKey, { lng: locale })}
-      utilities={
-        <>
-          <SyncStatusPill label={syncLabel} tone={syncTone} onClick={() => navigate('/sync-center')} />
+        utilities={
+          <>
+          <SyncStatusPill
+            label={syncLabel}
+            tone={syncTone}
+            unreadCount={status?.unreadConflictCount ?? 0}
+            onClick={() => navigate(syncCenterHref)}
+          />
           {activeNavId === 'settings' ? null : (
             <SearchToolbar
               search={searchTerm}
@@ -131,6 +153,9 @@ function DesktopShellRoutes() {
         </>
       }
     >
+      {location.pathname !== '/sync-center' ? (
+        <SyncAttentionToast conflict={latestUnreadConflict} onReview={() => navigate(syncCenterHref)} />
+      ) : null}
       <Routes>
         <Route path="/" element={<AllBookmarksPage />} />
         <Route path="/starred" element={<StarredBookmarksPage />} />

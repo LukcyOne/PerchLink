@@ -15,6 +15,8 @@ pub use metadata::{desktop_queue_metadata_extraction, desktop_retry_metadata_ext
 pub use search::{desktop_filter_bookmarks, desktop_search_bookmarks};
 pub use sync::{
     desktop_ack_sync_push_results, desktop_apply_remote_events, desktop_clear_sync_connection,
-    desktop_get_sync_connection, desktop_get_sync_status, desktop_list_sync_outbox,
+    desktop_get_sync_connection, desktop_get_sync_status, desktop_list_sync_conflicts,
+    desktop_list_sync_outbox, desktop_list_sync_rounds, desktop_mark_sync_conflict_read,
+    desktop_prepare_sync_resync, desktop_rebuild_sync_state, desktop_record_sync_round,
     desktop_save_sync_connection,
 };

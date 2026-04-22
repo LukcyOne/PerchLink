@@ -27,7 +27,7 @@ export function SyncDevicesPanel({ currentDeviceId, devices, onRevoke }: SyncDev
             padding: 'var(--space-xl)',
           }}
         >
-          No registered devices yet.
+          {t('sync.devicesEmptyTitle')}
         </article>
       ) : (
         devices.map((device) => {
@@ -52,7 +52,7 @@ export function SyncDevicesPanel({ currentDeviceId, devices, onRevoke }: SyncDev
                   {isCurrent ? t('sync.currentDevice') : t('sync.linkedDevice')}
                 </div>
                 <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--type-label)' }}>
-                  Last cursor: {device.lastCursor}
+                  {t('sync.deviceLastCursor')}: {device.lastCursor}
                 </div>
               </div>
               {!isCurrent ? (

@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use std::collections::HashSet;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -99,7 +101,7 @@ pub struct SyncPullEventDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SyncBookmarkTagDto {
+pub struct SyncBookmarkTagDto {
     id: String,
     label: String,
     color: Option<String>,
@@ -107,7 +109,7 @@ struct SyncBookmarkTagDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SyncBookmarkSnapshotDto {
+pub struct SyncBookmarkSnapshotDto {
     id: String,
     url: String,
     normalized_url: String,
@@ -131,7 +133,7 @@ struct SyncBookmarkSnapshotDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SyncCategorySnapshotDto {
+pub struct SyncCategorySnapshotDto {
     id: String,
     name: String,
     slug: Option<String>,
@@ -146,7 +148,7 @@ struct SyncCategorySnapshotDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SyncCollectionSnapshotDto {
+pub struct SyncCollectionSnapshotDto {
     id: String,
     name: String,
     description: Option<String>,
@@ -155,6 +157,42 @@ struct SyncCollectionSnapshotDto {
     updated_at: String,
     deleted_at: Option<String>,
     version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRoundRecordDto {
+    pub id: String,
+    pub direction: String,
+    pub status: String,
+    pub push_count: i64,
+    pub pull_count: i64,
+    pub message: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConflictRecordDto {
+    pub id: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub reason_code: String,
+    pub local_payload: Option<serde_json::Value>,
+    pub server_snapshot: Option<serde_json::Value>,
+    pub unread: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBootstrapPayloadDto {
+    pub server_cursor: i64,
+    pub bookmarks: Vec<SyncBookmarkSnapshotDto>,
+    pub categories: Vec<SyncCategorySnapshotDto>,
+    pub collections: Vec<SyncCollectionSnapshotDto>,
 }
 
 fn to_command_error(error: DbError) -> String {
@@ -281,6 +319,477 @@ fn upsert_conflict_record(
         ],
     )?;
     Ok(())
+}
+
+fn list_sync_rounds(connection: &Connection) -> Result<Vec<SyncRoundRecordDto>, DbError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, direction, status, push_count, pull_count, message, started_at, finished_at
+        FROM sync_rounds
+        ORDER BY started_at DESC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(SyncRoundRecordDto {
+            id: row.get(0)?,
+            direction: row.get(1)?,
+            status: row.get(2)?,
+            push_count: row.get(3)?,
+            pull_count: row.get(4)?,
+            message: row.get(5)?,
+            started_at: row.get(6)?,
+            finished_at: row.get(7)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn record_sync_round(connection: &Connection, round: &SyncRoundRecordDto) -> Result<(), DbError> {
+    connection.execute(
+        "
+        INSERT INTO sync_rounds (
+          id,
+          direction,
+          status,
+          push_count,
+          pull_count,
+          message,
+          started_at,
+          finished_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ON CONFLICT(id) DO UPDATE SET
+          direction = excluded.direction,
+          status = excluded.status,
+          push_count = excluded.push_count,
+          pull_count = excluded.pull_count,
+          message = excluded.message,
+          started_at = excluded.started_at,
+          finished_at = excluded.finished_at
+        ",
+        params![
+            round.id,
+            round.direction,
+            round.status,
+            round.push_count,
+            round.pull_count,
+            round.message,
+            round.started_at,
+            round.finished_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn list_sync_conflicts(connection: &Connection) -> Result<Vec<SyncConflictRecordDto>, DbError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT
+          id,
+          entity_type,
+          entity_id,
+          reason_code,
+          local_payload_json,
+          server_snapshot_json,
+          unread,
+          created_at,
+          updated_at
+        FROM sync_conflicts
+        ORDER BY unread DESC, updated_at DESC, created_at DESC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let local_payload_json = row.get::<_, Option<String>>(4)?;
+        let server_snapshot_json = row.get::<_, Option<String>>(5)?;
+        Ok(SyncConflictRecordDto {
+            id: row.get(0)?,
+            entity_type: row.get(1)?,
+            entity_id: row.get(2)?,
+            reason_code: row.get(3)?,
+            local_payload: local_payload_json.and_then(|json| serde_json::from_str(&json).ok()),
+            server_snapshot: server_snapshot_json.and_then(|json| serde_json::from_str(&json).ok()),
+            unread: row.get::<_, i64>(6)? != 0,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn mark_sync_conflict_read(connection: &Connection, conflict_id: &str) -> Result<(), DbError> {
+    connection.execute(
+        "
+        UPDATE sync_conflicts
+        SET unread = 0
+        WHERE id = ?1
+        ",
+        [conflict_id],
+    )?;
+    Ok(())
+}
+
+fn load_bookmark_tags(connection: &Connection, bookmark_id: &str) -> Result<Vec<SyncBookmarkTagDto>, DbError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT t.id, t.label, t.color
+        FROM bookmark_tags bt
+        INNER JOIN tags t ON t.id = bt.tag_id
+        WHERE bt.bookmark_id = ?1
+        ORDER BY t.label COLLATE NOCASE ASC
+        ",
+    )?;
+    let rows = statement.query_map([bookmark_id], |row| {
+        Ok(SyncBookmarkTagDto {
+            id: row.get(0)?,
+            label: row.get(1)?,
+            color: row.get(2)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn load_bookmark_collection_ids(connection: &Connection, bookmark_id: &str) -> Result<Vec<String>, DbError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT collection_id
+        FROM collection_bookmarks
+        WHERE bookmark_id = ?1
+        ORDER BY position ASC, collection_id ASC
+        ",
+    )?;
+    let rows = statement.query_map([bookmark_id], |row| row.get::<_, String>(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn load_bookmark_snapshot_value(connection: &Connection, bookmark_id: &str) -> Result<Option<serde_json::Value>, DbError> {
+    let row = connection
+        .query_row(
+            "
+            SELECT
+              id,
+              url,
+              normalized_url,
+              title,
+              description,
+              favicon,
+              cover_url,
+              primary_category_id,
+              is_starred,
+              processing_status,
+              processing_error,
+              user_edited_mask,
+              created_at,
+              updated_at,
+              deleted_at,
+              version
+            FROM bookmarks
+            WHERE id = ?1
+            ",
+            [bookmark_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, i64>(8)? != 0,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, String>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, i64>(15)?,
+                ))
+            },
+        )
+        .optional()?;
+
+    let Some((
+        id,
+        url,
+        normalized_url,
+        title,
+        description,
+        favicon,
+        cover_url,
+        primary_category_id,
+        is_starred,
+        processing_status,
+        processing_error,
+        user_edited_mask_json,
+        created_at,
+        updated_at,
+        deleted_at,
+        version,
+    )) = row
+    else {
+        return Ok(None);
+    };
+
+    let snapshot = SyncBookmarkSnapshotDto {
+        id: id.clone(),
+        url,
+        normalized_url,
+        title,
+        description: description.clone(),
+        description_excerpt: description,
+        favicon,
+        cover_url,
+        primary_category_id,
+        is_starred,
+        processing_status,
+        processing_error,
+        user_edited_mask: serde_json::from_str(&user_edited_mask_json).unwrap_or_default(),
+        tags: load_bookmark_tags(connection, &id)?,
+        collection_ids: load_bookmark_collection_ids(connection, &id)?,
+        created_at,
+        updated_at,
+        deleted_at,
+        version,
+    };
+
+    Ok(Some(serde_json::to_value(snapshot)?))
+}
+
+fn load_category_snapshot_value(connection: &Connection, category_id: &str) -> Result<Option<serde_json::Value>, DbError> {
+    let snapshot = connection
+        .query_row(
+            "
+            SELECT id, name, slug, parent_id, sort_order, is_system, created_at, updated_at, deleted_at, version
+            FROM categories
+            WHERE id = ?1
+            ",
+            [category_id],
+            |row| {
+                Ok(SyncCategorySnapshotDto {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    slug: row.get(2)?,
+                    parent_id: row.get(3)?,
+                    sort_order: row.get(4)?,
+                    is_system: row.get::<_, i64>(5)? != 0,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    deleted_at: row.get(8)?,
+                    version: row.get(9)?,
+                })
+            },
+        )
+        .optional()?;
+
+    match snapshot {
+        Some(snapshot) => Ok(Some(serde_json::to_value(snapshot)?)),
+        None => Ok(None),
+    }
+}
+
+fn load_collection_snapshot_value(connection: &Connection, collection_id: &str) -> Result<Option<serde_json::Value>, DbError> {
+    let snapshot = connection
+        .query_row(
+            "
+            SELECT id, name, description, sort_order, created_at, updated_at, deleted_at, version
+            FROM collections
+            WHERE id = ?1
+            ",
+            [collection_id],
+            |row| {
+                Ok(SyncCollectionSnapshotDto {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    sort_order: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                    deleted_at: row.get(6)?,
+                    version: row.get(7)?,
+                })
+            },
+        )
+        .optional()?;
+
+    match snapshot {
+        Some(snapshot) => Ok(Some(serde_json::to_value(snapshot)?)),
+        None => Ok(None),
+    }
+}
+
+fn load_local_entity_snapshot_value(
+    connection: &Connection,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<Option<serde_json::Value>, DbError> {
+    match entity_type {
+        "bookmark" => load_bookmark_snapshot_value(connection, entity_id),
+        "category" => load_category_snapshot_value(connection, entity_id),
+        "collection" => load_collection_snapshot_value(connection, entity_id),
+        _ => Ok(None),
+    }
+}
+
+fn apply_sync_snapshot(connection: &Connection, entity_type: &str, snapshot_value: serde_json::Value) -> Result<(), DbError> {
+    match entity_type {
+        "bookmark" => apply_bookmark_snapshot(connection, snapshot_value),
+        "category" => apply_category_snapshot(connection, snapshot_value),
+        "collection" => apply_collection_snapshot(connection, snapshot_value),
+        _ => Ok(()),
+    }
+}
+
+fn refresh_conflict_server_snapshots(connection: &Connection) -> Result<(), DbError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, entity_type, entity_id
+        FROM sync_conflicts
+        WHERE reason_code = 'cursor_expired' OR server_snapshot_json IS NULL
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (conflict_id, entity_type, entity_id) = row?;
+        if let Some(snapshot) = load_local_entity_snapshot_value(connection, &entity_type, &entity_id)? {
+            connection.execute(
+                "
+                UPDATE sync_conflicts
+                SET server_snapshot_json = ?2
+                WHERE id = ?1
+                ",
+                params![conflict_id, snapshot.to_string()],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_server_snapshot_if_present(connection: &Connection, result: &SyncPushResultDto) -> Result<(), DbError> {
+    if let Some(snapshot) = result.server_snapshot.clone() {
+        apply_sync_snapshot(connection, &result.entity_type, snapshot)?;
+    }
+    Ok(())
+}
+
+fn prepare_sync_resync(connection: &Connection) -> Result<(), DbError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, entity_type, entity_id, payload_json
+        FROM sync_outbox
+        ORDER BY created_at ASC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (change_id, entity_type, entity_id, payload_json) = row?;
+        let local_payload = serde_json::from_str::<serde_json::Value>(&payload_json).ok();
+        let result = SyncPushResultDto {
+            change_id,
+            entity_type,
+            entity_id,
+            status: "rejected".to_string(),
+            reason_code: Some("cursor_expired".to_string()),
+            applied_entity_version: None,
+            server_seq: None,
+            server_snapshot: None,
+        };
+        upsert_conflict_record(connection, &result, local_payload)?;
+    }
+
+    connection.execute("DELETE FROM sync_outbox", [])?;
+    Ok(())
+}
+
+fn clear_synced_tables(connection: &Connection) -> Result<(), DbError> {
+    connection.execute("DELETE FROM bookmark_search", [])?;
+    connection.execute("DELETE FROM bookmark_tags", [])?;
+    connection.execute("DELETE FROM collection_bookmarks", [])?;
+    connection.execute("DELETE FROM bookmarks", [])?;
+    connection.execute("DELETE FROM tags", [])?;
+    connection.execute("DELETE FROM collections", [])?;
+    connection.execute("DELETE FROM categories", [])?;
+    connection.execute(
+        "
+        INSERT INTO categories (
+          id,
+          name,
+          slug,
+          parent_id,
+          sort_order,
+          is_system,
+          created_at,
+          updated_at,
+          deleted_at,
+          version
+        ) VALUES (
+          'system-unsorted',
+          'Unsorted',
+          'unsorted',
+          NULL,
+          0,
+          1,
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          NULL,
+          1
+        )
+        ",
+        [],
+    )?;
+    Ok(())
+}
+
+fn sort_categories_for_apply(categories: Vec<SyncCategorySnapshotDto>) -> Vec<SyncCategorySnapshotDto> {
+    let known_ids = categories
+        .iter()
+        .map(|category| category.id.clone())
+        .collect::<HashSet<_>>();
+    let mut inserted = HashSet::new();
+    let mut remaining = categories;
+    let mut sorted = Vec::new();
+
+    while !remaining.is_empty() {
+        let before = remaining.len();
+        let mut index = 0;
+
+        while index < remaining.len() {
+            let ready = remaining[index]
+                .parent_id
+                .as_ref()
+                .map(|parent_id| inserted.contains(parent_id) || !known_ids.contains(parent_id))
+                .unwrap_or(true);
+
+            if ready {
+                let category = remaining.remove(index);
+                inserted.insert(category.id.clone());
+                sorted.push(category);
+            } else {
+                index += 1;
+            }
+        }
+
+        if remaining.len() == before {
+            sorted.append(&mut remaining);
+        }
+    }
+
+    sorted
 }
 
 fn apply_bookmark_snapshot(connection: &Connection, snapshot_value: serde_json::Value) -> Result<(), DbError> {
@@ -515,6 +1024,111 @@ pub fn desktop_list_sync_outbox(state: State<'_, DatabaseState>) -> Result<Vec<S
 }
 
 #[tauri::command]
+pub fn desktop_list_sync_rounds(state: State<'_, DatabaseState>) -> Result<Vec<SyncRoundRecordDto>, String> {
+    let connection = state.open_connection().map_err(to_command_error)?;
+    list_sync_rounds(&connection).map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn desktop_record_sync_round(
+    state: State<'_, DatabaseState>,
+    round: SyncRoundRecordDto,
+) -> Result<(), String> {
+    let connection = state.open_connection().map_err(to_command_error)?;
+    record_sync_round(&connection, &round).map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn desktop_list_sync_conflicts(state: State<'_, DatabaseState>) -> Result<Vec<SyncConflictRecordDto>, String> {
+    let connection = state.open_connection().map_err(to_command_error)?;
+    list_sync_conflicts(&connection).map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn desktop_mark_sync_conflict_read(
+    state: State<'_, DatabaseState>,
+    conflict_id: String,
+) -> Result<(), String> {
+    let connection = state.open_connection().map_err(to_command_error)?;
+    mark_sync_conflict_read(&connection, &conflict_id).map_err(to_command_error)
+}
+
+#[tauri::command]
+pub fn desktop_prepare_sync_resync(state: State<'_, DatabaseState>) -> Result<(), String> {
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+
+    prepare_sync_resync(&transaction).map_err(to_command_error)?;
+
+    if let Some(mut connection_record) = get_sync_connection(&transaction).map_err(to_command_error)? {
+        connection_record.last_error = Some("cursor_expired".to_string());
+        connection_record.syncing = false;
+        save_sync_connection_record(&transaction, &connection_record).map_err(to_command_error)?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn desktop_rebuild_sync_state(
+    state: State<'_, DatabaseState>,
+    payload: SyncBootstrapPayloadDto,
+) -> Result<(), String> {
+    let mut connection = state.open_connection().map_err(to_command_error)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    let timestamp = chrono_like_now();
+
+    clear_synced_tables(&transaction).map_err(to_command_error)?;
+
+    for category in sort_categories_for_apply(payload.categories) {
+        apply_category_snapshot(&transaction, serde_json::to_value(category).map_err(DbError::from).map_err(to_command_error)?)
+            .map_err(to_command_error)?;
+    }
+
+    for collection in payload.collections {
+        apply_collection_snapshot(
+            &transaction,
+            serde_json::to_value(collection).map_err(DbError::from).map_err(to_command_error)?,
+        )
+        .map_err(to_command_error)?;
+    }
+
+    for bookmark in payload.bookmarks {
+        apply_bookmark_snapshot(
+            &transaction,
+            serde_json::to_value(bookmark).map_err(DbError::from).map_err(to_command_error)?,
+        )
+        .map_err(to_command_error)?;
+    }
+
+    refresh_conflict_server_snapshots(&transaction).map_err(to_command_error)?;
+
+    if let Some(mut connection_record) = get_sync_connection(&transaction).map_err(to_command_error)? {
+        if let Some(current_device) = connection_record.current_device.as_mut() {
+            current_device.last_cursor = payload.server_cursor;
+            current_device.updated_at = timestamp.clone();
+            current_device.last_seen_at = Some(timestamp.clone());
+        }
+        connection_record.last_pull_at = Some(timestamp.clone());
+        connection_record.last_error = None;
+        connection_record.syncing = false;
+        save_sync_connection_record(&transaction, &connection_record).map_err(to_command_error)?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| to_command_error(DbError::from(error)))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn desktop_ack_sync_push_results(
     state: State<'_, DatabaseState>,
     results: Vec<SyncPushResultDto>,
@@ -533,6 +1147,8 @@ pub fn desktop_ack_sync_push_results(
             .optional()
             .map_err(|error| to_command_error(DbError::from(error)))?
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
+
+        apply_server_snapshot_if_present(&transaction, &result).map_err(to_command_error)?;
 
         match result.status.as_str() {
             "accepted" | "accepted_merged" | "noop" => {
@@ -608,6 +1224,8 @@ pub fn desktop_apply_remote_events(
         connection_record.syncing = false;
         save_sync_connection_record(&transaction, &connection_record).map_err(to_command_error)?;
     }
+
+    refresh_conflict_server_snapshots(&transaction).map_err(to_command_error)?;
 
     transaction
         .commit()

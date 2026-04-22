@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 interface SyncStatusPillProps {
   label: string;
   tone?: 'muted' | 'positive' | 'warning';
+  unreadCount?: number;
   onClick?: () => void;
 }
 
@@ -25,7 +26,7 @@ const toneMap: Record<NonNullable<SyncStatusPillProps['tone']>, CSSProperties> =
   },
 };
 
-export function SyncStatusPill({ label, tone = 'muted', onClick }: SyncStatusPillProps) {
+export function SyncStatusPill({ label, tone = 'muted', unreadCount = 0, onClick }: SyncStatusPillProps) {
   const { t } = useTranslation();
   return (
     <button
@@ -38,10 +39,32 @@ export function SyncStatusPill({ label, tone = 'muted', onClick }: SyncStatusPil
         fontSize: 'var(--type-label)',
         fontWeight: 'var(--weight-semibold)',
         cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 'var(--space-sm)',
         ...toneMap[tone],
       }}
     >
       {label || t('sync.statusLocalOnly')}
+      {unreadCount > 0 ? (
+        <span
+          style={{
+            minWidth: 20,
+            height: 20,
+            padding: '0 6px',
+            borderRadius: 999,
+            background: 'var(--color-accent)',
+            color: '#fff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12,
+            lineHeight: 1,
+          }}
+        >
+          {unreadCount}
+        </span>
+      ) : null}
     </button>
   );
 }

@@ -18,14 +18,14 @@ interface SyncOverviewPanelProps {
 export function SyncOverviewPanel(props: SyncOverviewPanelProps) {
   const { t } = useTranslation();
   const items = [
-    ['Connection', props.connectionState],
-    ['Account', props.accountName ?? 'Not signed in'],
-    ['Remote', props.remoteAddress ?? 'Not connected'],
-    ['Current Device', props.currentDeviceName ?? 'Local mode'],
-    ['Pending Pushes', String(props.pendingPushCount)],
-    ['Unread Conflicts', String(props.unreadConflictCount)],
-    ['Last Push', props.lastPushAt ?? 'Not yet'],
-    ['Last Pull', props.lastPullAt ?? 'Not yet'],
+    [t('sync.overviewConnection'), props.connectionState],
+    [t('sync.overviewAccount'), props.accountName ?? t('sync.notSignedIn')],
+    [t('sync.overviewRemote'), props.remoteAddress ?? t('sync.notConnected')],
+    [t('sync.overviewCurrentDevice'), props.currentDeviceName ?? t('sync.statusLocalOnly')],
+    [t('sync.overviewPendingPushes'), String(props.pendingPushCount)],
+    [t('sync.overviewUnreadConflicts'), String(props.unreadConflictCount)],
+    [t('sync.overviewLastPush'), props.lastPushAt ?? t('sync.notYet')],
+    [t('sync.overviewLastPull'), props.lastPullAt ?? t('sync.notYet')],
   ] as const;
 
   return (
@@ -86,7 +86,7 @@ export function SyncOverviewPanel(props: SyncOverviewPanelProps) {
             padding: 'var(--space-lg)',
           }}
         >
-          <strong>Latest Error</strong>
+          <strong>{t('sync.overviewLatestError')}</strong>
           <p style={{ marginBottom: 0 }}>{props.lastError}</p>
         </section>
       ) : null}
